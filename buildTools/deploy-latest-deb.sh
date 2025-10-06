@@ -42,6 +42,7 @@ set -e
 set -x
 cd $REMOTE_PATH
 
+
 # Extract package name from the .deb file
 PKG_NAME=\$(dpkg-deb -f "$REMOTE_PATH/$DEB_BASENAME" Package)
 
@@ -55,7 +56,27 @@ fi
 if dpkg -l | grep -q "^ii  \$PKG_NAME "; then
     echo "Uninstalling existing package: \$PKG_NAME"
     sudo dpkg -r \$PKG_NAME
+
 fi
+
+sudo rm -rf /opt/talos-kms-server
+sudo mkdir -p /opt/talos-kms-server
+cd /opt/talos-kms-server
+
+# Generate a private key (PKCS#1)
+sudo openssl genrsa -out kms.flipflopforge.dev.key 2048
+
+# Generate a certificate signing request (CSR)
+sudo openssl req -new -key kms.flipflopforge.dev.key -out kms.flipflopforge.dev.csr -subj \"/CN=kms.flipflopforge.dev\"
+
+# Generate a self-signed certificate
+sudo openssl x509 -req -days 365 -in kms.flipflopforge.dev.csr -signkey kms.flipflopforge.dev.key -out server.crt
+
+# Convert the private key to PKCS#8 format, encrypted with password 'changeit'
+sudo openssl pkcs8 -topk8 -inform PEM -outform PEM -in kms.flipflopforge.dev.key -out server.key -passout pass:changeit
+sudo chown -R talos-kms:talos-kms /opt/talos-kms-server
+
+cd $REMOTE_PATH
 
 echo "Installing new package: $DEB_BASENAME"
 sudo dpkg -i $DEB_BASENAME

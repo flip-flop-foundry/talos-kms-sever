@@ -63,7 +63,6 @@ echo -e "${CYAN}Building $APP_NAME version: $APP_VERSION${NC}"
 BUILD_DIR="target/deb-work"
 INSTALL_DIR="/opt/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
-CERT_DIR="$INSTALL_DIR/certs"
 
 
 DOCKER_ARCHS=""
@@ -125,11 +124,7 @@ After=network.target
 Type=simple
 User=talos-kms
 Group=talos-kms
-ExecStart=$INSTALL_DIR/bin/$APP_NAME \
-    50051 \
-    ${CERT_DIR}/server.crt \
-    ${CERT_DIR}/server-pkcs8.key \
-    ${CERT_DIR}/ca.crt
+ExecStart=$INSTALL_DIR/bin/$APP_NAME --config $INSTALL_DIR/config.yaml
 Restart=always
 WorkingDirectory=$WORK_DIR
 

@@ -68,15 +68,15 @@ class KmsConfigBean {
         // Read YAML content
         String yamlContent = file.text
         // Prepare comments
-        String comments = """# Talos KMS Configuration File\n" +
-                "# nodeDbFile: Path to the node database json file, it will be created if it doesnt exist.\n" +
-                "# serverCertFile: Path to the server certificate file.\n" +
-                "# serverKeyFile: Path to the server private key file, needs to be pkcs8 format.\n" +
-                "# serverKeyPassword: Password for the server private key.\n" +
-                "# port: Port to run the KMS server on.\n" +
-                "# bindAddress: Network interface/address to bind the server to (e.g., 0.0.0.0, 127.0.0.1).\n" +
-                "# kmsLogLevel: Log level for KMS logs (e.g., INFO, DEBUG).\n" +
-                "# rootLogLevel: Log level for root logger (e.g., WARNING, INFO).\n\n"""
+        String comments = "#Talos KMS Configuration File\n"+
+                "#nodeDbFile: Path to the node database json file, it will be created if it doesnt exist.\n"+
+                "#serverCertFile: Path to the server certificate file.\n"+
+                "#serverKeyFile: Path to the server private key file, needs to be pkcs8 format.\n"+
+                "#serverKeyPassword: Password for the server private key.\n"+
+                "#port: Port to run the KMS server on.\n"+
+                "#bindAddress: Network interface/address to bind the server to (e.g., 0.0.0.0, 127.0.0.1).\n"+
+                "#kmsLogLevel: Log level for KMS logs (e.g., INFO, DEBUG).\n"+
+                "#rootLogLevel: Log level for root logger (e.g., WARNING, INFO).\n"
         // Write comments + YAML back to file
         file.text = comments + yamlContent
 
