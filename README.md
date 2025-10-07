@@ -61,13 +61,20 @@ The attacker would then need to get access to the Talos node or a backup of it t
 #### Backup of the KMS server
 If an attacker can get access to a backup of the unencrypted filesystem of the KMS server, or the database file but can't facilitate a man in the middle attack, they would have to brute force all the individual AES-256-GCM keys to decrypt the lvm keys.
 
+### Alternatives to KMS
+
+Talos also supports storing the disk encryption keys in TPM or as STATIC. 
+
+Static keys are the least secure option, the keys for the STATE partition are stored in clear text both in the Talos config and on the META partition. So an atacker that has access to either the Talos config or the META partition can retrieve the keys.
+
+TPM is in theory more secure, but if you aren't running TALOS on bare metal, you are likely running it in a VM, and the security of the TPM is then dependent on the hypervisor. If an attacker can get access to the hypervisor, they can retrieve the keys from the TPM. In my case I run Talos on Proxmox, and Proxmox doest not by default store the TPM data encrypted, so an attacker with access to the Proxmox host can potentially retrieve the keys.
 
 ## Requirements
 
 * Static IP addresses of the talos nodes
     * Or decryption will fail
 * TLS certificate trusted by the talos nodes
-    * Self-signed will not work, ideally use a certificate from a trusted CA or use ACME
+    * **NOTE Self-signed will not work**, ideally use a certificate from a trusted CA or use ACME
         * See: [Disk Encryption](https://www.talos.dev/v1.11/talos-guides/configuration/disk-encryption/)
     * A matching DNS name for the KMS server
 * Network access from the talos nodes to the KMS server
@@ -81,4 +88,67 @@ If an attacker can get access to a backup of the unencrypted filesystem of the K
 1. Download the latest .deb file from the [releases](https://github.com/flip-flop-foundry/talos-kms-sever/releases)
    * Make sure to pick the correct architecture
 2. Install the .deb file using `sudo dpkg -i talos-kms-server-XXXX.deb`
-* Add Acme documentation
+3. If your system has systemd, a service has been installed and enabled
+   * The service is called `talos-kms-server`
+   * The service will start automatically on boot, but will fail if not configured
+4. Configure the KMS server, see [Configuration](#configuration)
+
+### Configuration
+
+If your system has systemd, the configuration file is located at `/opt/talos-kms-server/config.yaml`, a default one will have been created during installation, and the service will fail to start until configured.
+
+If you are not using systemd you can create your own configuration file, and start the server manually using `/opt/talos-kms-server/bin/talos-kms-server --config /opt/talos-kms-server/config.yaml`
+
+
+Example configuration file:
+
+```yaml
+nodeDbFile: "/opt/talos-kms-server/nodeDbFile.json"
+serverCertFile: "/opt/talos-kms-server/server.crt" #Must be a PEM encoded certificate, trusted by the talos nodes
+serverKeyFile: "/opt/talos-kms-server/server.key" #Must be a pkcs8 key
+serverKeyPassword: "changeit"
+port: 50051
+bindAddress: "0.0.0.0"
+kmsLogLevel: "INFO"
+rootLogLevel: "WARNING"
+```
+
+Once configured, start the service using `sudo systemctl restart talos-kms-server`
+
+
+### Troubleshooting
+
+* Check the output of `systemctl status talos-kms-server`
+* Read the complete logs using `journalctl -u talos-kms-server`
+* Follow the logs using `journalctl -u talos-kms-server -f`
+
+
+
+### Setup ACME Certs for TLS
+
+If you want to use ACME/LetsEncrypt to get a trusted TLS certificate, you can use [acme.sh](https://github.com/acmesh-official/acme.sh) to obtain and renew the certificate. Using the DNS challenge is recommended, as the KMS server SHOULD NEVER be exposed to the internet.
+
+The deb file comes with a script to reload the KMS server when the certificate is renewed, located at `/opt/talos-kms-server/lib/acmeReload.sh`. If you keep the default settings in the config file you dont need to edit it. But if you do edit it make sure to move it to another location, or it will be overwritten during upgrades, and update the --reloadcmd in the acme.sh command below.
+
+Example using Cloudflare DNS challenge:
+
+```shell
+#Install Acme.sh
+curl https://get.acme.sh | sh
+
+export CF_Token="YOUR_CLOUDFLARE_API_TOKEN"
+export CF_Zone_ID="YOUR_CLOUDFLARE_ZONE_ID"
+export YOUR_DOMAIN="kms.example.com"
+acme.sh --register-account -m your@mail.com
+
+acme.sh --issue --dns dns_cf -d "$YOUR_DOMAIN"
+
+acme.sh --install-cert -d "$YOUR_DOMAIN" \
+  --cert-file /opt/talos-kms-server/server.crt \
+  --key-file /opt/talos-kms-server/server.key.pem \
+  --reloadcmd "/opt/talos-kms-server/lib/acmeReload.sh"
+
+
+```
+
+TPE, STATIC VS KMS

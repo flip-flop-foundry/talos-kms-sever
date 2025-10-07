@@ -17,6 +17,8 @@ BUILD_FOR_ARCHS=("linux/amd64" "linux/arm64")
 DOCKER_BUILD_IMAGE="talos-kms-build:latest"
 # Get artifactId and version from pom.xml
 
+BUILD_TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 
 POM_FILE="../pom.xml"
 if [ ! -f "$POM_FILE" ]; then
@@ -85,7 +87,7 @@ container() {
 
 echo -e "${CYAN}Building custom Docker image for building .deb packages...${NC}"
 
-container build --manifest "$DOCKER_BUILD_IMAGE" -f debBuildResources/builder/Dockerfile --platform "$DOCKER_ARCHS" .
+container build --manifest "$DOCKER_BUILD_IMAGE" -f "$BUILD_TOOLS_DIR/debBuildResources/builder/Dockerfile" --platform "$DOCKER_ARCHS" .
 
 
 
@@ -145,10 +147,6 @@ if ! getent passwd talos-kms >/dev/null; then
     useradd -r -g talos-kms -d /opt/talos-kms-server -s /sbin/nologin talos-kms
 fi
 
-# Create certificate directory
-mkdir -p /etc/talos-kms/certs
-chown -R talos-kms:talos-kms /etc/talos-kms
-
 # Check if systemctl is available
 if which systemctl >/dev/null 2>&1; then
     # System uses systemd
@@ -186,6 +184,11 @@ EOF
 
 chmod +x "$BUILD_DIR/resources/prerm"
 
+
+# Copy acmeReload.sh to resources and make it executable
+cp "$BUILD_TOOLS_DIR/debBuildResources/acmeReload.sh" "$BUILD_DIR/resources/"
+chmod +x "$BUILD_DIR/resources/acmeReload.sh"
+
 # Create the .deb package
 cat > "$BUILD_DIR/jpackage.sh" << EOF
 echo "Creating .deb package..."
@@ -207,6 +210,7 @@ jpackage \
   --install-dir "/opt/" \
   --icon "" \
   --app-content "/build/resources/$APP_NAME.service" \
+  --app-content "/build/resources/acmeReload.sh" \
   --verbose
 
 EOF
@@ -215,7 +219,7 @@ EOF
 
 chmod +x "$BUILD_DIR/jpackage.sh"
 
-#set -x # Enable command echoing for debugging
+
 
 echo -e "${CYAN}Building .deb packages in Docker...${NC}"
 
