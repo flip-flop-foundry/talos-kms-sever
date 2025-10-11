@@ -14,11 +14,11 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import java.security.SecureRandom
 
-import org.slf4j.Logger
+import ch.qos.logback.classic.Logger
 import org.slf4j.LoggerFactory
 
 class KMSServiceImpl extends KMSServiceGrpc.KMSServiceImplBase {
-    private static final Logger log = LoggerFactory.getLogger(KMSServiceImpl.class)
+    private static final Logger log = (Logger) LoggerFactory.getLogger(KMSServiceImpl.class)
 
     KmsConfigBean kmsConfig
 

@@ -4,8 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
-
-import java.util.logging.Level
+import ch.qos.logback.classic.Level
 
 class KmsConfigBean {
 
@@ -35,8 +34,8 @@ class KmsConfigBean {
 
         KmsConfigBean config = mapper.readValue(configFile, KmsConfigBean)
         config.configFile = configFile
-        config.kmsLogLevel = Level.parse(config.kmsLogLevelName)
-        config.rootLogLevel = Level.parse(config.rootLogLevelName)
+        config.kmsLogLevel = Level.toLevel(config.kmsLogLevelName)
+        config.rootLogLevel = Level.toLevel(config.rootLogLevelName)
         if (!config.bindAddress) config.bindAddress = "0.0.0.0"
 
         return config
@@ -57,8 +56,8 @@ class KmsConfigBean {
         defaultConfig.serverCertFile = new File("server.crt")
         defaultConfig.serverKeyFile = new File("server.key")
         defaultConfig.serverKeyPassword = "changeit"
-        defaultConfig.kmsLogLevelName = Level.INFO.name
-        defaultConfig.rootLogLevelName = Level.WARNING.name
+        defaultConfig.kmsLogLevelName = Level.INFO.levelStr
+        defaultConfig.rootLogLevelName = Level.WARN.levelStr
         defaultConfig.port = 50051
         defaultConfig.bindAddress = "0.0.0.0"
 
@@ -75,8 +74,8 @@ class KmsConfigBean {
                 "#serverKeyPassword: Password for the server private key.\n"+
                 "#port: Port to run the KMS server on.\n"+
                 "#bindAddress: Network interface/address to bind the server to (e.g., 0.0.0.0, 127.0.0.1).\n"+
-                "#kmsLogLevel: Log level for KMS logs (e.g., INFO, DEBUG).\n"+
-                "#rootLogLevel: Log level for root logger (e.g., WARNING, INFO).\n"
+                "#kmsLogLevel: Log level for KMS logs (e.g., OFF, ERROR, WARN, INFO, DEBUG, TRACE).\n"+
+                "#rootLogLevel: Log level for root logger (e.g., OFF, ERROR, WARN, INFO, DEBUG, TRACE).\n"
         // Write comments + YAML back to file
         file.text = comments + yamlContent
 

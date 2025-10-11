@@ -1,11 +1,12 @@
 package dev.flipflopfoundy.taloskms.beans
 
+import ch.qos.logback.classic.Logger
 import com.fasterxml.jackson.annotation.JsonFormat
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
-import org.slf4j.Logger
+import ch.qos.logback.classic.Logger
 import org.slf4j.LoggerFactory
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant
@@ -25,7 +26,7 @@ class NodeBean {
     Instant createdAt
 
     @JsonIgnore
-    static Logger log = LoggerFactory.getLogger(NodeBean.class)
+    static Logger log = (Logger) LoggerFactory.getLogger(NodeBean.name)
 
     @JsonIgnore
     static ObjectMapper mapper = new ObjectMapper()
