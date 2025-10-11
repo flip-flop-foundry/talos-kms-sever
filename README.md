@@ -144,7 +144,7 @@ acme.sh --register-account -m your@mail.com
 acme.sh --issue --dns dns_cf -d "$YOUR_DOMAIN"
 
 acme.sh --install-cert -d "$YOUR_DOMAIN" \
-  --cert-file /opt/talos-kms-server/server.crt \
+  --fullchain-file  /opt/talos-kms-server/server.crt \
   --key-file /opt/talos-kms-server/server.key.pem \
   --reloadcmd "/opt/talos-kms-server/lib/acmeReload.sh"
 

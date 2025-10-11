@@ -133,7 +133,7 @@ class NodeBean {
         nodeDbLock.writeLock().lock()
         try {
             try {
-                mapper.writerWithDefaultPrettyPrinter().writeValue(kmsConfig.nodeDbFile, nodeBeans)
+                mapper.writerWithDefaultPrettyPrinter().writeValue(kmsConfig.nodeDbFile, nodeBeans.sort {it.lastAccess}.reversed())
             } catch (Exception e) {
                 log.error("Failed to write node DB file: ${e.message}", e)
                 throw e

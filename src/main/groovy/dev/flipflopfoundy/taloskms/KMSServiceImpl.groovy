@@ -60,9 +60,16 @@ class KMSServiceImpl extends KMSServiceGrpc.KMSServiceImplBase {
             System.arraycopy(newNodeKey, 0, nonceAndKey, nonce.length, newNodeKey.length)
             ByteString newNodeKeyByteString = ByteString.copyFrom(nonceAndKey)
             Response response = Response.newBuilder().setData(newNodeKeyByteString).build()
-            responseObserver.onNext(response)
-            responseObserver.onCompleted()
-            log.debug("\tCreated new node: ${newNodeBean.nonceB64}")
+
+
+            try {
+                responseObserver.onNext(response)
+                responseObserver.onCompleted()
+                log.debug("\tCreated and responded to new node: ${newNodeBean.nonceB64}")
+            } catch (Exception e1) {
+                log.error("Failed to send response to client for nonce ${newNodeBean?.nonceB64}: ${e1.message}", e1)
+                throw e1
+            }
         } catch (Exception e) {
             log.error("Error in seal: ${e.message}", e)
             responseObserver.onError(Status.INTERNAL.withDescription("Seal failed").asException())
@@ -117,14 +124,21 @@ class KMSServiceImpl extends KMSServiceGrpc.KMSServiceImplBase {
                 new SecureRandom().nextBytes(decryptedData)
                 response = Response.newBuilder().setData(ByteString.copyFrom(decryptedData)).build()
                 return
-            }
-            if (response) {
+            } else {
                 log.info("\tUnseal successful for nonce ${connectingNonceB64}")
                 response = Response.newBuilder().setData(ByteString.copyFrom(decryptedData)).build()
             }
 
-            responseObserver.onNext(response)
-            responseObserver.onCompleted()
+
+            try {
+                responseObserver.onNext(response)
+                responseObserver.onCompleted()
+                log.info("\tResponse sent sucesffuly to client for nonce ${connectingNonceB64}")
+            } catch (Exception e1) {
+                log.error("Failed to send response to client for nonce ${connectingNonceB64}: ${e1.message}", e1)
+                throw e1
+            }
+
         } catch (Exception e) {
             log.error("Error in unseal: ${e.message} - returning random data", e)
 
