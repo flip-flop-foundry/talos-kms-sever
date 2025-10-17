@@ -2,7 +2,13 @@
 
 A simple KMS server for disk encryption in Talos clusters, intended to be run as Linux systemd service.
 
-An alternative to using TPM or STATIC keys for disk encryption in Talos.
+## Alternatives to KMS
+
+Talos also supports storing the disk encryption keys in TPM or as STATIC.
+
+Static keys are the least secure option, the keys for the STATE partition are stored in clear text both in the Talos machine config and on the META partition. So an attacker that has access to either the Talos machine config or the META partition can retrieve the keys.
+
+TPM is in theory more secure, but if you aren't running TALOS on bare metal, you are likely running it in a VM, and the security of the TPM is then dependent on the hypervisor. If an attacker can get access to the hypervisor, they can retrieve the keys from the TPM. In my case I run Talos on Proxmox, and Proxmox doest not by default store the TPM data encrypted, so an attacker with access to the Proxmox host or a backup of the Talos VMS can potentially retrieve the keys.
 
 
 ## Features
@@ -10,10 +16,25 @@ An alternative to using TPM or STATIC keys for disk encryption in Talos.
 * Supported by [Talos Disk Encryption](https://www.talos.dev/v1.11/talos-guides/configuration/disk-encryption/)
 * Works for State, Ephemeral and [UserVolumes](https://www.talos.dev/v1.11/talos-guides/configuration/disk-management/user/)
 
+## Security
+
+* The lvm keys are encrypted using AES-256-GCM
+* Each volume get an individual AES-256-GCM key
+* The encrypted lvm keys are stored in a local json file, ideally on an encrypted filesystem
+* Communication with the Talos node is done using TLSv1.3+ only
+
+### For extra security
+
+For extra security, be sure to follow these guidelines
+
+* Only run the KMS server when starting talos nodes, then stop the service
+* Encrypt the filesystem where the KMS server stores the encrypted lvm keys
+* Use a firewall to only allow access to the KMS server from the Talos nodes
+
 
 ## Basic Operation
 
-1. The Talos node boots, determines that a disk needs to be encrypted
+1. The Talos node boots for the first time, determines that a disk needs to be encrypted
 2. The Talos node generates a random lvm key for the disk and sends it to the KMS server in a "seal" request
 3. The KMS server:
     * Collects the node UUID and IP address from the request
@@ -25,31 +46,20 @@ An alternative to using TPM or STATIC keys for disk encryption in Talos.
     * Stores the encrypted lvm key, nonce, node UUID and IP address in a local json file
     * Returns the nonce and the AES-256-GCM key to the Talos node in the response
 4. The Talos node receives the response, stores the nonce and AES-256-GCM key locally
+5. The Talos node encrypts the disk using the lvm key, and "forgets" the key
 5. When needed, the talos node sends an "unseal" request to the KMS server with its node UUID, AES-256-GCM key and nonce
 6. The KMS server:
     * Looks up the encrypted lvm key in the local json file using the nonce
-    * Configures GCM to use the node UUID and IP address as AAD
+    * Configures GCM to use the node UUID and and the request IP address as AAD
     * Decrypts the lvm key using AES-256-GCM with the provided key, nonce and AAD
         * If the lvm key or nonce is invalid, decryption will fail
-        * If the connecting IP address does not match the stored IP address, decryption will fail
-        * If the node UUID does not match the stored node UUID, decryption will fail
-        * If decryption fails, the KMS server will return an incorrect lvm key to the Talos node, this is to avoid leaking information about the failure
+        * If the connecting IP address does not match the original connecting IP address, decryption will fail
+        * If the node UUID does not match the original connecting node UUID, decryption will fail
+        * If decryption fails, the KMS server will return a random incorrect lvm key to the Talos node, this is to avoid leaking information about the failure
     * Returns the decrypted lvm key to the Talos node in the response
 7. The Talos node receives the decrypted lvm key and uses it to unlock the disk
 
 
-## Security
-
-* The lvm keys are encrypted using AES-256-GCM
-* Each volume get an individual AES-256-GCM key
-* The encrypted lvm keys are stored in a local json file, ideally on an encrypted filesystem
-* TLS support (TLSv1.3+ only)
-
-### For extra security
-    
-* Only run the KMS server when starting talos nodes
-* Encrypt the filesystem where the KMS server stores the encrypted lvm keys
-* Use a firewall to only allow access to the KMS server from the Talos nodes
 
 ### Attack Vectors
 
@@ -58,23 +68,16 @@ If an attacker can control either the node or a backup of the node, spin it up i
 
 #### Man in the middle
 If an attacker can intercept the communication between the Talos node and the KMS server, using a by talos node trusted certificate, they can retrieve the lvm key.
-The attacker would then need to get access to the Talos node or a backup of it to use the lvm key.
+After that, an attacker would then need to get access to the Talos node or a backup of it to use the lvm key.
 
 #### Backup of the KMS server
 If an attacker can get access to a backup of the unencrypted filesystem of the KMS server, or the database file but can't facilitate a man in the middle attack, they would have to brute force all the individual AES-256-GCM keys to decrypt the lvm keys.
 
-### Alternatives to KMS
-
-Talos also supports storing the disk encryption keys in TPM or as STATIC. 
-
-Static keys are the least secure option, the keys for the STATE partition are stored in clear text both in the Talos config and on the META partition. So an atacker that has access to either the Talos config or the META partition can retrieve the keys.
-
-TPM is in theory more secure, but if you aren't running TALOS on bare metal, you are likely running it in a VM, and the security of the TPM is then dependent on the hypervisor. If an attacker can get access to the hypervisor, they can retrieve the keys from the TPM. In my case I run Talos on Proxmox, and Proxmox doest not by default store the TPM data encrypted, so an attacker with access to the Proxmox host can potentially retrieve the keys.
 
 ## Requirements
 
 * Static IP addresses of the talos nodes
-    * Or decryption will fail
+    * During the decryption, the requesting IP is verified
 * TLS certificate trusted by the talos nodes
     * **NOTE Self-signed will not work**, ideally use a certificate from a trusted CA or use ACME
         * See: [Disk Encryption](https://www.talos.dev/v1.11/talos-guides/configuration/disk-encryption/)
@@ -82,7 +85,7 @@ TPM is in theory more secure, but if you aren't running TALOS on bare metal, you
 * Network access from the talos nodes to the KMS server
 * A linux system capable of installing .deb files
   * deb files for amd64 and arm64 are provided
-  * Systemd configuration is provided
+  * Systemd configuration is provided and setup during installation
 
 
 ## Installation
@@ -108,11 +111,11 @@ Example configuration file:
 nodeDbFile: "/etc/talos-kms-server/nodeDbFile.json"
 serverCertFile: "/etc/talos-kms-server/server.crt" #Must be a PEM encoded certificate, trusted by the talos nodes
 serverKeyFile: "/etc/talos-kms-server/server.key" #Must be a pkcs8 key
-serverKeyPassword: "changeit"
-port: 50051
+serverKeyPassword: "changeit" # The password for decrypting the pkcs8 key
+port: 50051 # The port that the KMS server will listen to
 bindAddress: "0.0.0.0"
-kmsLogLevel: "INFO"
-rootLogLevel: "WARNING"
+kmsLogLevel: "INFO" # Log level for KMS specific loggers
+rootLogLevel: "WARNING" # Log level for all Loggers used by KMS
 ```
 
 Once configured, start the service using `sudo systemctl restart talos-kms-server`
@@ -128,7 +131,7 @@ Once configured, start the service using `sudo systemctl restart talos-kms-serve
 
 ### Setup ACME Certs for TLS
 
-If you want to use ACME/LetsEncrypt to get a trusted TLS certificate, you can use [acme.sh](https://github.com/acmesh-official/acme.sh) to obtain and renew the certificate. Using the DNS challenge is recommended, as the KMS server SHOULD NEVER be exposed to the internet.
+If you want to use ACME/LetsEncrypt to get a trusted TLS certificate, you can use [acme.sh](https://github.com/acmesh-official/acme.sh) to obtain and renew the certificate. Using the DNS challenge is recommended, as the KMS server **SHOULD NEVER** be exposed to the internet.
 
 The deb file comes with a script to reload the KMS server when the certificate is renewed, located at `/opt/talos-kms-server/lib/acmeReload.sh`. If you keep the default settings in the config file you dont need to edit it. But if you do edit it make sure to move it to another location, or it will be overwritten during upgrades, and update the --reloadcmd in the acme.sh command below.
 
@@ -152,5 +155,75 @@ acme.sh --install-cert -d "$YOUR_DOMAIN" \
 
 
 ```
+## Setting Up Talos To Use KMS
 
-TPE, STATIC VS KMS
+Always refer to Talos own documentation, this is just example config
+
+```yaml
+machine:
+    systemDiskEncryption:
+        # State partition encryption.
+        state:
+            provider: luks2 # Encryption provider to use for the encryption.
+            # Defines the encryption keys generation and storage method.
+            keys:
+                - # KMS managed encryption key.
+                  kms:
+                    endpoint: https://kms.exmaple.com:50051 # KMS endpoint to Seal/Unseal the key.
+                  slot: 0 # Key slot number for LUKS2 encryption.
+        ephemeral:
+          provider: luks2 # Encryption provider to use for the encryption.
+          # Defines the encryption keys generation and storage method.
+          keys:
+            - # KMS managed encryption key.
+              kms:
+                endpoint: https://kms.exmaple.com:50051 # KMS endpoint to Seal/Unseal the key.
+              slot: 0 # Key slot number for LUKS2 encryption.
+
+
+#Add to end of controlplane.yaml/worker.yaml
+---
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: hddVolume
+
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/sdb" && disk.rotational == true
+  grow: true
+  minSize: 10Gi
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      kms:
+        endpoint: https://kms.example.com:50051
+
+
+```
+
+## nodeDbFile.json explained
+
+The database file used by the kms server contains an array of JSON objects that look like this:
+
+```json
+
+{
+  "nodeUuid" : "213faf71-17a0-43d7-a88b-0afd96094178",
+  "ipAddress" : "10.0.0.201",
+  "cipherTextB64" : "CZVlmwwkZcUjNd0JBcqWqR6BxGh3iGerVwYg6B6gYPpIDQvoIpxHj0nnHiEA0X8n",
+  "nonceB64" : "Lh1oTReoyx4mI3Y8",
+  "lastAccess" : "2025-10-11 20:22:24",
+  "createdAt" : "2025-10-11 20:22:17"
+}
+
+```
+
+* **nodeUuid:** A unique ID that each talos node generates
+* **ipAddress:** The ip address used during the initial seal request
+  * This is here mainly to make the JSON more human friendly, this IP is **NOT** used to validate that that the unseal request is from the original host, that is baked in to the encryption key. Changing this IP will **NOT** fix decryption problems if your node has a new IP. 
+* **cipherTextB64:** A base64 representation of the encrypted lvm key, ip and UUID
+* **nonceB64:** A base64 representation of the nonce used during the encryption
+* **lastAccess:** The last time this secret was accessed, regardless if it was a successful unseal or not
+  * Intended to help you clean up old and stale keys you dont need anymore
+* **created:** Timestamp of when the key/seal was created
