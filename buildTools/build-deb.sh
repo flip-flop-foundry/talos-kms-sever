@@ -64,6 +64,7 @@ echo -e "${CYAN}Building $APP_NAME version: $APP_VERSION${NC}"
 # Directory structure
 BUILD_DIR="target/deb-work"
 INSTALL_DIR="/opt/$APP_NAME"
+CONFIG_DIR="/etc/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
 
 
@@ -126,7 +127,7 @@ After=network.target
 Type=simple
 User=talos-kms
 Group=talos-kms
-ExecStart=$INSTALL_DIR/bin/$APP_NAME --config $INSTALL_DIR/config.yaml
+ExecStart=$INSTALL_DIR/bin/$APP_NAME --config $CONFIG_DIR/config.yaml
 Restart=always
 WorkingDirectory=$WORK_DIR
 
@@ -146,6 +147,13 @@ fi
 if ! getent passwd talos-kms >/dev/null; then
     useradd -r -g talos-kms -d /opt/talos-kms-server -s /sbin/nologin talos-kms
 fi
+
+chown -R talos-kms:talos-kms "$INSTALL_DIR"
+
+mkdir -p "$CONFIG_DIR"
+chown -R talos-kms:talos-kms "$CONFIG_DIR"
+chmod -R 750 "$CONFIG_DIR"
+
 
 # Check if systemctl is available
 if which systemctl >/dev/null 2>&1; then

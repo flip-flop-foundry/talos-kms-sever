@@ -5,8 +5,8 @@
 
 set -e
 # Path to config file (edit if needed)
-CONFIG_FILE="/opt/talos-kms-server/config.yaml"
-ACME_KEY_FILE="/opt/talos-kms-server/server.key.pem"
+CONFIG_FILE="/etc/talos-kms-server/config.yaml"
+ACME_KEY_FILE="/etc/talos-kms-server/server.key.pem"
 TALOS_USER="talos-kms"
 TALOS_GROUP="talos-kms"
 

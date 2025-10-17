@@ -12,9 +12,9 @@ SSH_KEY_FILE="$3"
 REMOTE_PATH="${4:-/tmp}"
 
 
-#REMOTE_USER="$(whoami)"
-#REMOTE_HOST=""
-#SSH_KEY_FILE="~/.ssh/talos-kms-dev"
+REMOTE_USER="$(whoami)"
+REMOTE_HOST="192.168.39.25"
+SSH_KEY_FILE="~/.ssh/talos-kms-dev"
 
 if [ -z "$REMOTE_USER" ] || [ -z "$REMOTE_HOST" ] || [ -z "$SSH_KEY_FILE" ]; then
     echo "Usage: $0 <remote_user> <remote_host> <ssh_key_file> [remote_path]" >&2
@@ -59,22 +59,6 @@ if dpkg -l | grep -q "^ii  \$PKG_NAME "; then
 
 fi
 
-sudo rm -rf /opt/talos-kms-server
-sudo mkdir -p /opt/talos-kms-server
-cd /opt/talos-kms-server
-
-# Generate a private key (PKCS#1)
-sudo openssl genrsa -out kms.flipflopforge.dev.key 2048
-
-# Generate a certificate signing request (CSR)
-sudo openssl req -new -key kms.flipflopforge.dev.key -out kms.flipflopforge.dev.csr -subj \"/CN=kms.flipflopforge.dev\"
-
-# Generate a self-signed certificate
-sudo openssl x509 -req -days 365 -in kms.flipflopforge.dev.csr -signkey kms.flipflopforge.dev.key -out server.crt
-
-# Convert the private key to PKCS#8 format, encrypted with password 'changeit'
-sudo openssl pkcs8 -topk8 -inform PEM -outform PEM -in kms.flipflopforge.dev.key -out server.key -passout pass:changeit
-sudo chown -R talos-kms:talos-kms /opt/talos-kms-server
 
 cd $REMOTE_PATH
 

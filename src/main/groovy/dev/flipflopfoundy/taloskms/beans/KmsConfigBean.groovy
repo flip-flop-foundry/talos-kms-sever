@@ -53,8 +53,8 @@ class KmsConfigBean {
         KmsConfigBean defaultConfig = new KmsConfigBean()
         defaultConfig.configFile = file
         defaultConfig.nodeDbFile = new File(file.parentFile, "nodeDbFile.json")
-        defaultConfig.serverCertFile = new File("server.crt")
-        defaultConfig.serverKeyFile = new File("server.key")
+        defaultConfig.serverCertFile = new File(file.parentFile,"server.crt")
+        defaultConfig.serverKeyFile = new File(file.parentFile,"server.key")
         defaultConfig.serverKeyPassword = "changeit"
         defaultConfig.kmsLogLevelName = Level.INFO.levelStr
         defaultConfig.rootLogLevelName = Level.WARN.levelStr

@@ -2,6 +2,8 @@
 
 A simple KMS server for disk encryption in Talos clusters, intended to be run as Linux systemd service.
 
+An alternative to using TPM or STATIC keys for disk encryption in Talos.
+
 
 ## Features
 
@@ -95,17 +97,17 @@ TPM is in theory more secure, but if you aren't running TALOS on bare metal, you
 
 ### Configuration
 
-If your system has systemd, the configuration file is located at `/opt/talos-kms-server/config.yaml`, a default one will have been created during installation, and the service will fail to start until configured.
+If your system has systemd, the configuration file is located at `/etc/talos-kms-server/config.yaml`, a default one will have been created during installation, and the service will fail to start until configured.
 
-If you are not using systemd you can create your own configuration file, and start the server manually using `/opt/talos-kms-server/bin/talos-kms-server --config /opt/talos-kms-server/config.yaml`
+If you are not using systemd you can create your own configuration file, and start the server manually using `/opt/talos-kms-server/bin/talos-kms-server --config /etc/talos-kms-server/config.yaml`
 
 
 Example configuration file:
 
 ```yaml
-nodeDbFile: "/opt/talos-kms-server/nodeDbFile.json"
-serverCertFile: "/opt/talos-kms-server/server.crt" #Must be a PEM encoded certificate, trusted by the talos nodes
-serverKeyFile: "/opt/talos-kms-server/server.key" #Must be a pkcs8 key
+nodeDbFile: "/etc/talos-kms-server/nodeDbFile.json"
+serverCertFile: "/etc/talos-kms-server/server.crt" #Must be a PEM encoded certificate, trusted by the talos nodes
+serverKeyFile: "/etc/talos-kms-server/server.key" #Must be a pkcs8 key
 serverKeyPassword: "changeit"
 port: 50051
 bindAddress: "0.0.0.0"
@@ -144,8 +146,8 @@ acme.sh --register-account -m your@mail.com
 acme.sh --issue --dns dns_cf -d "$YOUR_DOMAIN"
 
 acme.sh --install-cert -d "$YOUR_DOMAIN" \
-  --fullchain-file  /opt/talos-kms-server/server.crt \
-  --key-file /opt/talos-kms-server/server.key.pem \
+  --fullchain-file  /etc/talos-kms-server/server.crt \
+  --key-file /etc/talos-kms-server/server.key.pem \
   --reloadcmd "/opt/talos-kms-server/lib/acmeReload.sh"
 
 
