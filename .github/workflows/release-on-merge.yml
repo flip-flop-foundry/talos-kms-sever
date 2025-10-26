@@ -1,9 +1,6 @@
-# Replaced push-triggered release workflow with the PR-merge based release workflow (safe mode).
-# This workflow runs when a PR is merged into main (uses pull_request_target closed event) and
-# builds the .deb artifacts, creates/pushes an annotated tag v<version>, and creates a GitHub Release
-# attaching the built .deb files.
+# Merged release workflow: on PR merge to main, build debs, create tag/release, then bump main to next minor SNAPSHOT
 
-name: Release on merge (PR-based)
+name: Release on PR merge (build + bump)
 
 on:
   pull_request_target:
@@ -49,53 +46,47 @@ jobs:
         run: |
           chmod +x buildTools/build-deb.sh
 
-      - name: Run build-deb.sh (build deb packages)
+      - name: Determine current Maven version
+        id: get_version
+        run: |
+          set -euo pipefail
+          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          if [ -z "$CUR_VER" ]; then
+            echo "Could not determine project.version via Maven" >&2
+            exit 1
+          fi
+          echo "cur_version=$CUR_VER" >> $GITHUB_OUTPUT
+
+      - name: Set release version (commit to main) before building
+        id: set_release
+        run: |
+          set -euo pipefail
+          CUR=${{ steps.get_version.outputs.cur_version }}
+          RELEASE=${CUR%-SNAPSHOT}
+          echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+          echo "tag=$RELEASE" >> $GITHUB_OUTPUT
+
+          # Use Maven versions plugin to set the release version
+          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
+
+          # Commit and push the release version to main so build operates on the released POM
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pom.xml
+          git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
+          git push origin HEAD:${{ github.event.pull_request.base.ref }}
+
+      - name: Build .deb packages
         run: |
           set -euo pipefail
           cd buildTools/
           bash build-deb.sh
 
-      - name: Upload debs artifact (for release job)
-        uses: actions/upload-artifact@v4
-        with:
-          name: debs
-          path: target/deb-work/output/*.deb
-          retention-days: 7
-
-      - name: Determine version via Maven
-        id: version
-        run: |
-          set -euo pipefail
-          tag=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
-          if [ -z "$tag" ]; then
-            echo "Could not determine version via Maven" >&2
-            exit 1
-          fi
-          tag=${tag%-SNAPSHOT}
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-
-      - name: Create and push git tag
-        if: steps.version.outputs.tag != ''
-        run: |
-          set -euo pipefail
-          TAG="v${{ steps.version.outputs.tag }}"
-          echo "Preparing to create tag $TAG"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch --prune --tags origin
-          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
-            echo "Tag $TAG already exists on remote; skipping tag creation"
-          else
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
-            echo "Pushed tag $TAG to origin"
-          fi
-
       - name: Check for existing GitHub Release for this tag
         id: check_release
         run: |
           set -euo pipefail
-          TAG="v${{ steps.version.outputs.tag }}"
+          TAG=v${{ steps.set_release.outputs.tag }}
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
           HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" "$API")
           if [ "$HTTP_STATUS" = "200" ]; then
@@ -108,15 +99,30 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Create and push git tag (if needed)
+        if: steps.check_release.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          TAG=v${{ steps.set_release.outputs.tag }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch --prune --tags origin
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "Tag $TAG already exists on remote; skipping tag creation"
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+            echo "Pushed tag $TAG to origin"
+          fi
+
       - name: Upload debs to existing release (if present)
         if: steps.check_release.outputs.exists == 'true'
         run: |
           set -euo pipefail
           UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
-          echo "Uploading debs to existing release at $UPLOAD_URL"
           for f in target/deb-work/output/*.deb; do
             if [ -f "$f" ]; then
-              echo "Uploading $f"
+              echo "Uploading $f to existing release"
               curl -sSL -X POST "$UPLOAD_URL?name=$(basename "$f")" \
                 -H "Authorization: Bearer $GITHUB_TOKEN" \
                 -H "Content-Type: application/octet-stream" \
@@ -124,12 +130,39 @@ jobs:
             fi
           done
 
-      - name: Create GitHub Release and attach debs (only if release does not already exist)
+      - name: Create GitHub Release and attach debs (if no existing release)
         if: steps.check_release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.tag }}
-          name: v${{ steps.version.outputs.tag }}
+          tag_name: v${{ steps.set_release.outputs.tag }}
+          name: v${{ steps.set_release.outputs.tag }}
           files: 'target/deb-work/output/*.deb'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump main to next minor SNAPSHOT
+        id: bump_after_release
+        run: |
+          set -euo pipefail
+
+          # Read current version via maven (should reflect the just-committed release version)
+          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          if [ -z "$CUR_VER" ]; then
+            echo "Could not determine current version for bump" >&2
+            exit 1
+          fi
+          BASE=${CUR_VER%-SNAPSHOT}
+          IFS='.' read -r MAJ MIN REST <<< "$BASE" || true
+          MAJ=${MAJ:-0}
+          MIN=${MIN:-0}
+          NEW_MIN=$((MIN + 1))
+          NEW_VERSION="${MAJ}.${NEW_MIN}-SNAPSHOT"
+
+          echo "Setting new project version to $NEW_VERSION"
+          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pom.xml
+          git commit -m "ci: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
+          git push origin HEAD:${{ github.event.pull_request.base.ref }}
