@@ -1,33 +1,31 @@
-# GitHub Actions workflow: on push to main, rebuild debs and create a GitHub Release with .deb assets
+# Replaced push-triggered release workflow with the PR-merge based release workflow (safe mode).
+# This workflow runs when a PR is merged into main (uses pull_request_target closed event) and
+# builds the .deb artifacts, creates/pushes an annotated tag v<version>, and creates a GitHub Release
+# attaching the built .deb files.
 
-name: "Release on merge: build debs and create Release"
+name: Release on merge (PR-based)
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Branch or commit SHA to run the workflow against (optional)'
-        required: false
-        default: ''
+  pull_request_target:
+    types: [closed]
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build .deb packages
+  release_on_pr_merge:
+    name: Release when PR merged to main
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
 
     steps:
-      - name: Checkout
+      - name: Checkout base branch (main)
         uses: actions/checkout@v4
         with:
-          # Use workflow_dispatch input.ref if provided, otherwise default to the event ref
-          ref: ${{ github.event.inputs.ref || github.ref }}
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -35,62 +33,42 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Install apt packages (maven) for build job
+      - name: Install apt packages (maven) and docker build deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y maven
+          sudo apt-get install -y maven libxml2-utils curl jq
+
+      - name: Set up QEMU emulation (for multi-arch builds)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
       - name: Ensure build script is executable
-        run: chmod +x buildTools/build-deb.sh
+        run: |
+          chmod +x buildTools/build-deb.sh
 
-      - name: Build deb packages
+      - name: Run build-deb.sh (build deb packages)
         run: |
           set -euo pipefail
-          bash buildTools/build-deb.sh
+          cd buildTools/
+          bash build-deb.sh
 
-      - name: Upload debs as artifact for release job
+      - name: Upload debs artifact (for release job)
         uses: actions/upload-artifact@v4
         with:
           name: debs
           path: target/deb-work/output/*.deb
           retention-days: 7
 
-  release:
-    name: Create GitHub Release with debs
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download deb artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: debs
-          path: debs
-
-      - name: Checkout repository to read pom.xml
-        uses: actions/checkout@v4
-        with:
-          # Use the workflow_dispatch input.ref when provided so manual runs can target a specific branch/commit
-          ref: ${{ github.event.inputs.ref || github.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
-
-      - name: Install xmllint for version extraction
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y maven
-
-      - name: Get version from Maven
+      - name: Determine version via Maven
         id: version
         run: |
           set -euo pipefail
-          # Use Maven to evaluate the effective project.version (handles parent/property resolution)
           tag=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
           if [ -z "$tag" ]; then
-            echo "Could not determine version via mvn help:evaluate" >&2
+            echo "Could not determine version via Maven" >&2
             exit 1
           fi
           tag=${tag%-SNAPSHOT}
@@ -104,9 +82,7 @@ jobs:
           echo "Preparing to create tag $TAG"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Ensure we have the latest refs
           git fetch --prune --tags origin
-          # Check remote for existing tag
           if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
             echo "Tag $TAG already exists on remote; skipping tag creation"
           else
@@ -115,11 +91,45 @@ jobs:
             echo "Pushed tag $TAG to origin"
           fi
 
-      - name: Create GitHub Release and upload debs
+      - name: Check for existing GitHub Release for this tag
+        id: check_release
+        run: |
+          set -euo pipefail
+          TAG="v${{ steps.version.outputs.tag }}"
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+          HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" "$API")
+          if [ "$HTTP_STATUS" = "200" ]; then
+            RELEASE_ID=$(jq -r .id /tmp/release_resp.json)
+            UPLOAD_URL=$(jq -r .upload_url /tmp/release_resp.json | sed -e 's/{?name,label}//')
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+            echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload debs to existing release (if present)
+        if: steps.check_release.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
+          echo "Uploading debs to existing release at $UPLOAD_URL"
+          for f in target/deb-work/output/*.deb; do
+            if [ -f "$f" ]; then
+              echo "Uploading $f"
+              curl -sSL -X POST "$UPLOAD_URL?name=$(basename "$f")" \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"$f" || echo "Warning: upload of $f failed"
+            fi
+          done
+
+      - name: Create GitHub Release and attach debs (only if release does not already exist)
+        if: steps.check_release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.tag }}
           name: v${{ steps.version.outputs.tag }}
-          files: 'debs/*.deb'
+          files: 'target/deb-work/output/*.deb'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
