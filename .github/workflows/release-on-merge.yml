@@ -6,6 +6,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit SHA to run the workflow against (optional)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -19,6 +25,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # Use workflow_dispatch input.ref if provided, otherwise default to the event ref
+          ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
 
       - name: Set up Java
@@ -63,6 +71,8 @@ jobs:
       - name: Checkout repository to read pom.xml
         uses: actions/checkout@v4
         with:
+          # Use the workflow_dispatch input.ref when provided so manual runs can target a specific branch/commit
+          ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
