@@ -92,7 +92,7 @@ If an attacker can get access to a backup of the unencrypted filesystem of the K
 
 ## Installation
 
-1. Download the latest .deb file from the [releases](https://github.com/flip-flop-foundry/talos-kms-sever/releases)
+1. Download the latest .deb file from the [releases](https://github.com/flip-flop-foundry/talos-kms-server/releases)
    * Make sure to pick the correct architecture
 2. Install the .deb file using `sudo dpkg -i talos-kms-server-XXXX.deb`
 3. If your system has systemd, a service has been installed and enabled
