@@ -176,7 +176,7 @@ machine:
             keys:
                 - # KMS managed encryption key.
                   kms:
-                    endpoint: https://kms.exmaple.com:50051 # KMS endpoint to Seal/Unseal the key.
+                    endpoint: https://kms.example.com:50051 # KMS endpoint to Seal/Unseal the key.
                   slot: 0 # Key slot number for LUKS2 encryption.
         ephemeral:
           provider: luks2 # Encryption provider to use for the encryption.
@@ -184,7 +184,7 @@ machine:
           keys:
             - # KMS managed encryption key.
               kms:
-                endpoint: https://kms.exmaple.com:50051 # KMS endpoint to Seal/Unseal the key.
+                endpoint: https://kms.example.com:50051 # KMS endpoint to Seal/Unseal the key.
               slot: 0 # Key slot number for LUKS2 encryption.
 
 
