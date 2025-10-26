@@ -1,0 +1,155 @@
+# GitHub Actions workflow: on pull request to main, bump pom minor version, run build-deb.sh and upload .deb artifacts
+
+name: "PR: bump version, build debs (staged)"
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit SHA to run the workflow against (optional)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  bump-and-build:
+    name: Bump POM, build debs and upload artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          # Use PR head if available (pull_request event); otherwise fall back to workflow_dispatch input.ref or the workflow ref
+          ref: ${{ github.event.pull_request != null && github.event.pull_request.head.sha || github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Java and Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install apt packages (maven, libxml2-utils) and docker build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y maven libxml2-utils curl
+
+      - name: Set up QEMU emulation (for multi-arch builds)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Ensure build script is executable
+        run: |
+          chmod +x buildTools/build-deb.sh
+
+      - id: bump
+        name: Bump pom.xml minor version (in-place) and push to PR branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Ensure mvn is available (apt install step earlier already installs maven on Linux runners)
+          if ! command -v mvn >/dev/null 2>&1; then
+            echo "mvn not found; installing maven..."
+            if [ "$(uname -s)" = "Linux" ]; then
+              sudo apt-get update && sudo apt-get install -y maven
+            else
+              echo "Maven required on non-Linux runner; please ensure mvn is available" >&2
+              exit 1
+            fi
+          fi
+
+          # Avoid infinite loop: if the latest commit was authored by the actions bot, assume bump already ran
+          LAST_AUTHOR=$(git --no-pager log -1 --pretty=format:'%an') || LAST_AUTHOR=""
+          echo "Last commit author: $LAST_AUTHOR"
+          if [ "$LAST_AUTHOR" = "github-actions[bot]" ]; then
+            echo "Detected last commit by github-actions[bot]; skipping bump to avoid loop"
+            CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || echo "unknown")
+            CUR_VER=${CUR_VER:-unknown}
+            echo "new_version=$CUR_VER" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Determining current version from Maven..."
+          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          if [ -z "$CUR_VER" ]; then
+            echo "Could not determine current version from Maven" >&2
+            exit 1
+          fi
+
+          BASE=${CUR_VER%-SNAPSHOT}
+          IFS='.' read -r MAJ MIN REST <<< "$BASE" || true
+          MAJ=${MAJ:-0}
+          MIN=${MIN:-0}
+          NEW_MIN=$((MIN + 1))
+          NEW_VERSION="${MAJ}.${NEW_MIN}-SNAPSHOT"
+
+          echo "New version: $NEW_VERSION"
+
+          # Use Maven versions plugin to set the new version (no backup poms)
+          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add pom.xml
+          git commit -m "ci: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
+
+          # Only attempt to push back if this run was triggered by a pull_request event
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "Attempting to push bumped pom back to PR branch"
+            if git push origin HEAD:${{ github.event.pull_request.head.ref }}; then
+              echo "Pushed bumped pom to PR branch"
+            else
+              echo "Push failed (likely a forked PR). Creating a PR comment with bumped version and uploading bumped pom as artifact..."
+              BODY=$(printf '{"body":"Automated version bump could not be pushed to the branch. New version: %s. The bumped pom.xml has been uploaded as an artifact for maintainers."}' "$NEW_VERSION")
+              curl -s -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" -d "$BODY" "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/comments" || true
+            fi
+          else
+            echo "Not a pull_request event (e.g. manual dispatch). Skipping push and PR comment. The bumped pom.xml will be uploaded as an artifact."
+          fi
+
+      - name: Show bumped version
+        run: |
+          echo "Bumped version: ${{ steps.bump.outputs.new_version }}"
+
+      - name: Run build-deb.sh
+        id: build
+        run: |
+          set -euo pipefail
+          # run the project's build script which builds shaded jar and .deb packages
+          cd buildTools/
+          bash build-deb.sh
+        # If this step fails the job will fail and GitHub will display the logs in the PR checks
+
+      - name: Upload generated .deb artifacts (staged)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number || github.run_id }}-${{ steps.bump.outputs.new_version }}
+          path: |
+            target/deb-work/output/*.deb
+          retention-days: 30
+
+      - name: Upload bumped pom (if push failed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number || github.run_id }}-bumped-pom-${{ steps.bump.outputs.new_version }}
+          path: pom.xml
+          retention-days: 7
