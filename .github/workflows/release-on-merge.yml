@@ -88,7 +88,7 @@ jobs:
           set -euo pipefail
           TAG=v${{ steps.set_release.outputs.tag }}
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-          HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" "$API")
+          HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$API")
           if [ "$HTTP_STATUS" = "200" ]; then
             RELEASE_ID=$(jq -r .id /tmp/release_resp.json)
             UPLOAD_URL=$(jq -r .upload_url /tmp/release_resp.json | sed -e 's/{?name,label}//')
@@ -119,12 +119,12 @@ jobs:
         if: steps.check_release.outputs.exists == 'true'
         run: |
           set -euo pipefail
-          UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
+          UPLOAD_URL="${{ steps.check_release.outputs.upload_url }}"
           for f in target/deb-work/output/*.deb; do
             if [ -f "$f" ]; then
               echo "Uploading $f to existing release"
               curl -sSL -X POST "$UPLOAD_URL?name=$(basename "$f")" \
-                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Content-Type: application/octet-stream" \
                 --data-binary @"$f" || echo "Warning: upload of $f failed"
             fi
