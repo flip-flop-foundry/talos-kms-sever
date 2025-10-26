@@ -1,6 +1,5 @@
 package dev.flipflopfoundy.taloskms.beans
 
-import ch.qos.logback.classic.Logger
 import com.fasterxml.jackson.annotation.JsonFormat
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.core.type.TypeReference
@@ -8,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import ch.qos.logback.classic.Logger
 import org.slf4j.LoggerFactory
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import java.time.Instant
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
@@ -35,8 +34,8 @@ class NodeBean {
     static final ReentrantReadWriteLock nodeDbLock = new ReentrantReadWriteLock()
 
     static {
-        mapper.registerModule(new JavaTimeModule());
-        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.registerModule(new JavaTimeModule())
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     }
 
 

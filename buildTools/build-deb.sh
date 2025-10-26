@@ -247,7 +247,7 @@ END_TIME=$(date +%s)
 ELAPSED_TIME=$((END_TIME - START_TIME))
 echo -e "${GREEN}Build completed in $ELAPSED_TIME seconds.${NC}"
 
-echo -e "${GREEN}All done! .deb packages are in $BUILD_DIR/output$"
+echo -e "${GREEN}All done! .deb packages are in $BUILD_DIR/output${NC}"
 ls -lh "$BUILD_DIR/output"
 echo -e "${NC}"
 exit 0

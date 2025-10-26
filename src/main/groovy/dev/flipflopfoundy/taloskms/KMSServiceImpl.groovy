@@ -123,7 +123,6 @@ class KMSServiceImpl extends KMSServiceGrpc.KMSServiceImplBase {
                 log.warn("Decrypted data length mismatch: expected 32, got ${decryptedData.length} - returning random data")
                 new SecureRandom().nextBytes(decryptedData)
                 response = Response.newBuilder().setData(ByteString.copyFrom(decryptedData)).build()
-                return
             } else {
                 log.info("\tUnseal successful for nonce ${connectingNonceB64}")
                 response = Response.newBuilder().setData(ByteString.copyFrom(decryptedData)).build()
@@ -133,7 +132,7 @@ class KMSServiceImpl extends KMSServiceGrpc.KMSServiceImplBase {
             try {
                 responseObserver.onNext(response)
                 responseObserver.onCompleted()
-                log.info("\tResponse sent sucesffuly to client for nonce ${connectingNonceB64}")
+                log.info("\tResponse sent successfully to client for nonce ${connectingNonceB64}")
             } catch (Exception e1) {
                 log.error("Failed to send response to client for nonce ${connectingNonceB64}: ${e1.message}", e1)
                 throw e1

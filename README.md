@@ -128,7 +128,7 @@ Once configured, start the service using `sudo systemctl restart talos-kms-serve
 * Check the output of `systemctl status talos-kms-server`
 * Read the complete logs using `journalctl -u talos-kms-server`
 * Follow the logs using `journalctl -u talos-kms-server -f`
-* Noe that you can change the log level in the config file to get more or less verbose logging
+* Note that you can change the log level in the config file to get more or less verbose logging
 
 ### Backup
 
