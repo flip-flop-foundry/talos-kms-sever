@@ -120,7 +120,8 @@ jobs:
         run: |
           set -euo pipefail
           # run the project's build script which builds shaded jar and .deb packages
-          bash buildTools/build-deb.sh
+          cd buildTools/
+          bash build-deb.sh
         # If this step fails the job will fail and GitHub will display the logs in the PR checks
 
       - name: Upload generated .deb artifacts (staged)
