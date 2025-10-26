@@ -12,9 +12,6 @@ SSH_KEY_FILE="$3"
 REMOTE_PATH="${4:-/tmp}"
 
 
-REMOTE_USER="$(whoami)"
-REMOTE_HOST="192.168.39.25"
-SSH_KEY_FILE="~/.ssh/talos-kms-dev"
 
 if [ -z "$REMOTE_USER" ] || [ -z "$REMOTE_HOST" ] || [ -z "$SSH_KEY_FILE" ]; then
     echo "Usage: $0 <remote_user> <remote_host> <ssh_key_file> [remote_path]" >&2
