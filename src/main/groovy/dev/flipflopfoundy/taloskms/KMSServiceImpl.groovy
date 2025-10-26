@@ -108,10 +108,8 @@ class KMSServiceImpl extends KMSServiceGrpc.KMSServiceImplBase {
                 decryptedData = cipher.doFinal(Base64.decoder.decode(nodeBean.cipherTextB64))
             } catch (AEADBadTagException e) {
                 log.error("Decryption failed (bad tag) for node UUID ${connectingNodeUuid} from IP ${connectingIp}, has IP changed?", e)
-                log.error(e.stackTrace.toString())
             } catch (Exception e) {
                 log.error("Decryption failed for node UUID ${connectingNodeUuid} from IP ${connectingIp}: ${e.message}", e)
-                log.error(e.stackTrace.toString())
 
             }
 
