@@ -1,0 +1,115 @@
+# GitHub Actions workflow: on push to main, rebuild debs and create a GitHub Release with .deb assets
+
+name: "Release on merge: build debs and create Release"
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build .deb packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install apt packages (maven) for build job
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y maven
+
+      - name: Ensure build script is executable
+        run: chmod +x buildTools/build-deb.sh
+
+      - name: Build deb packages
+        run: |
+          set -euo pipefail
+          bash buildTools/build-deb.sh
+
+      - name: Upload debs as artifact for release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: debs
+          path: target/deb-work/output/*.deb
+          retention-days: 7
+
+  release:
+    name: Create GitHub Release with debs
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: debs
+          path: debs
+
+      - name: Checkout repository to read pom.xml
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Install xmllint for version extraction
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y maven
+
+      - name: Get version from Maven
+        id: version
+        run: |
+          set -euo pipefail
+          # Use Maven to evaluate the effective project.version (handles parent/property resolution)
+          tag=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          if [ -z "$tag" ]; then
+            echo "Could not determine version via mvn help:evaluate" >&2
+            exit 1
+          fi
+          tag=${tag%-SNAPSHOT}
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Create and push git tag
+        if: steps.version.outputs.tag != ''
+        run: |
+          set -euo pipefail
+          TAG="v${{ steps.version.outputs.tag }}"
+          echo "Preparing to create tag $TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Ensure we have the latest refs
+          git fetch --prune --tags origin
+          # Check remote for existing tag
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "Tag $TAG already exists on remote; skipping tag creation"
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+            echo "Pushed tag $TAG to origin"
+          fi
+
+      - name: Create GitHub Release and upload debs
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.tag }}
+          name: v${{ steps.version.outputs.tag }}
+          files: 'debs/*.deb'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

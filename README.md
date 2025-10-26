@@ -20,6 +20,8 @@ TPM is in theory more secure, but if you aren't running TALOS on bare metal, you
 
 * The lvm keys are encrypted using AES-256-GCM
 * Each volume get an individual AES-256-GCM key
+* The node UUID and IP address are used as additional authenticated data (AAD) during encryption
+  * This helps ensure that the encrypted lvm key can only be decrypted by the same node
 * The encrypted lvm keys are stored in a local json file, ideally on an encrypted filesystem
 * Communication with the Talos node is done using TLSv1.3+ only
 
@@ -47,17 +49,17 @@ For extra security, be sure to follow these guidelines
     * Returns the nonce and the AES-256-GCM key to the Talos node in the response
 4. The Talos node receives the response, stores the nonce and AES-256-GCM key locally
 5. The Talos node encrypts the disk using the lvm key, and "forgets" the key
-5. When needed, the talos node sends an "unseal" request to the KMS server with its node UUID, AES-256-GCM key and nonce
-6. The KMS server:
+6. When needed, the talos node sends an "unseal" request to the KMS server with its node UUID, AES-256-GCM key and nonce
+7. The KMS server:
     * Looks up the encrypted lvm key in the local json file using the nonce
-    * Configures GCM to use the node UUID and and the request IP address as AAD
+    * Configures GCM to use the node UUID and the request IP address as AAD
     * Decrypts the lvm key using AES-256-GCM with the provided key, nonce and AAD
         * If the lvm key or nonce is invalid, decryption will fail
         * If the connecting IP address does not match the original connecting IP address, decryption will fail
         * If the node UUID does not match the original connecting node UUID, decryption will fail
         * If decryption fails, the KMS server will return a random incorrect lvm key to the Talos node, this is to avoid leaking information about the failure
     * Returns the decrypted lvm key to the Talos node in the response
-7. The Talos node receives the decrypted lvm key and uses it to unlock the disk
+8. The Talos node receives the decrypted lvm key and uses it to unlock the disk
 
 
 
@@ -126,14 +128,19 @@ Once configured, start the service using `sudo systemctl restart talos-kms-serve
 * Check the output of `systemctl status talos-kms-server`
 * Read the complete logs using `journalctl -u talos-kms-server`
 * Follow the logs using `journalctl -u talos-kms-server -f`
+* Noe that you can change the log level in the config file to get more or less verbose logging
 
+### Backup
 
+Make sure to backup the `nodeDbFile` specified in the config file, as it contains all the encrypted lvm keys needed to unlock your talos nodes disks.
+
+**If KMS is the only LVM key you have set up, losing this file means losing access to your disks.**
 
 ### Setup ACME Certs for TLS
 
-If you want to use ACME/LetsEncrypt to get a trusted TLS certificate, you can use [acme.sh](https://github.com/acmesh-official/acme.sh) to obtain and renew the certificate. Using the DNS challenge is recommended, as the KMS server **SHOULD NEVER** be exposed to the internet.
+If you want to use ACME/LetsEncrypt to get a trusted TLS certificate for your KMS server, you can use [acme.sh](https://github.com/acmesh-official/acme.sh) to obtain and renew the certificate. Using the DNS challenge is recommended, as the KMS server **SHOULD NEVER** be exposed to the internet.
 
-The deb file comes with a script to reload the KMS server when the certificate is renewed, located at `/opt/talos-kms-server/lib/acmeReload.sh`. If you keep the default settings in the config file you dont need to edit it. But if you do edit it make sure to move it to another location, or it will be overwritten during upgrades, and update the --reloadcmd in the acme.sh command below.
+The deb file comes with a script to reload the KMS server when the certificate is renewed, located at `/opt/talos-kms-server/lib/acmeReload.sh`. If you keep the default settings in the config file you don't need to edit it. But if you do edit it make sure to move it to another location, or it will be overwritten during upgrades, and update the --reloadcmd in the acme.sh command below.
 
 Example using Cloudflare DNS challenge:
 
@@ -221,9 +228,9 @@ The database file used by the kms server contains an array of JSON objects that 
 
 * **nodeUuid:** A unique ID that each talos node generates
 * **ipAddress:** The ip address used during the initial seal request
-  * This is here mainly to make the JSON more human friendly, this IP is **NOT** used to validate that that the unseal request is from the original host, that is baked in to the encryption key. Changing this IP will **NOT** fix decryption problems if your node has a new IP. 
+  * This is here mainly to make the JSON more human friendly, this IP is **NOT** used to validate that the unseal request is from the original host, that is baked in to the encryption key. Changing this IP will **NOT** fix decryption problems if your node has a new IP. 
 * **cipherTextB64:** A base64 representation of the encrypted lvm key, ip and UUID
 * **nonceB64:** A base64 representation of the nonce used during the encryption
 * **lastAccess:** The last time this secret was accessed, regardless if it was a successful unseal or not
-  * Intended to help you clean up old and stale keys you dont need anymore
+  * Intended to help you clean up old and stale keys you don't need anymore
 * **created:** Timestamp of when the key/seal was created
