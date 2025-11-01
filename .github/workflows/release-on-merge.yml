@@ -64,7 +64,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
-      - name: Determine current project version
+      - name: Get Maven project metadata
         id: get_maven_metadata
         run: |
 
@@ -75,7 +75,7 @@ jobs:
           "project.artifactId:APP_NAME"
           "project.description:DESCRIPTION"
           "project.organization.name:VENDOR"
-          "project.developers.email:MAINTAINER_EMAIL"
+          "project.developers.developer.email:MAINTAINER_EMAIL"
           
           )
           

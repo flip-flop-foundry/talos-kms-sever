@@ -26,12 +26,6 @@ INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
 
-
-echo -e "${CYAN}Building fat JAR...${NC}"
-cd ../
-mvn clean package
-
-
 # Build the fat JAR
 echo -e "${CYAN}Building fat JAR...${NC}"
 cd ../
