@@ -77,9 +77,6 @@ jobs:
 
           )
           
-          echo "In dir: $(pwd)"
-          ls -l
-
           for entry in "${PARAMS[@]}"; do
             IFS=':' read -r EXPR OUT <<< "$entry"
             VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
@@ -92,9 +89,7 @@ jobs:
             mkdir -p .cache
             echo "${OUT}=${VALUE}" >> .cache/env_vars
           done
-#          cd buildTools/
-#          chmod +x echo-maven-metadata.sh
-#          bash echo-maven-metadata.sh
+            echo "save-success=true" >> $GITHUB_OUTPUT
 
       - name: Load cached env file into GITHUB_ENV
         run: |
@@ -105,18 +100,12 @@ jobs:
           done < ".cache/env_vars"
 
       - name: Save cache (actions/cache uploads at end for misses)
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        if: steps.get_maven_metadata.save-success == 'true'
+        uses: actions/cache/save@v4
         with:
           path: .cache/env_vars
           key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-env-
 
-      - name: List envs
-        run: |
-          env
-          
 
       - name: Set release version (commit to main) before building
         id: set_release
@@ -150,7 +139,7 @@ jobs:
           chmod +x buildTools/build-deb-in-docker.sh
           bash buildTools/build-deb-in-docker.sh
           echo "Built .deb packages; contents of target/deb-work/output/:"
-          exit 1
+
 
       - name: Check for existing GitHub Release for this tag
         id: check_release
