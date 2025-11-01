@@ -11,6 +11,8 @@ on:
       - synchronize
     branches:
       - main
+  push:
+    branches:
       - addingMatrixToWorkflow
   workflow_dispatch:
 
