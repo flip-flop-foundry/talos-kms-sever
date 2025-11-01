@@ -40,17 +40,6 @@ jobs:
         run: |
           cat "$GITHUB_EVENT_PATH"
 
-#      - name: Set up Java
-#        uses: actions/setup-java@v4
-#        with:
-#          distribution: temurin
-#          java-version: '21'
-#
-#      - name: Install apt packages (maven) and docker build deps
-#        if: runner.os == 'Linux'
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y maven libxml2-utils curl jq
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
@@ -65,16 +54,70 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
-      - name: Get Maven project metadata
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-env-
+
+      - name: If cache miss, get Maven project metadata
         id: get_maven_metadata
+        if: steps.cache-restore.outputs.cache-hit != 'true'
         run: |
-          cd buildTools/
-          chmod +x echo-maven-metadata.sh
-          bash echo-maven-metadata.sh
-  
+          
+          PARAMS=(
+          "project.version:MAVEN_VERSION"
+          "project.artifactId:APP_NAME"
+          "project.description:DESCRIPTION"
+          "project.organization.name:VENDOR"
+          "project.developers[0].email:MAINTAINER_EMAIL"
+
+          )
+          cd ../
+
+          for entry in "${PARAMS[@]}"; do
+            IFS=':' read -r EXPR OUT <<< "$entry"
+            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
+            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
+            echo "Determined $EXPR: $VALUE"
+            if [ -z "$VALUE" ]; then
+              echo "Could not determine $EXPR via Maven (docker)" >&2
+              exit 1
+            fi
+            echo "${OUT}=${VALUE}" >> .cache/env_vars
+          done
+#          cd buildTools/
+#          chmod +x echo-maven-metadata.sh
+#          bash echo-maven-metadata.sh
+
+      - name: Load cached env file into GITHUB_ENV
+        run: |
+          while IFS= read -r line; do
+            # handle CRLF if needed:
+            line=${line%$'\r'}
+            echo "$line" >> $GITHUB_ENV
+          done < ".cache/env_vars"
+
+      - name: Save cache (actions/cache uploads at end for misses)
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-env-
+
+      - name: List envs
+        run: |
+          env
+          
 
       - name: Set release version (commit to main) before building
         id: set_release
+        if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         env:
           BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
@@ -128,7 +171,7 @@ jobs:
           fi
 
       - name: Create and push git tag (if needed)
-        if: steps.check_release.outputs.exists != 'true'
+        if: steps.check_release.outputs.exists != 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         env:
           BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
@@ -147,7 +190,7 @@ jobs:
           fi
 
       - name: Upload debs to existing release (if present)
-        if: steps.check_release.outputs.exists == 'true'
+        if: steps.check_release.outputs.exists == 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         run: |
           set -euo pipefail
           UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
@@ -164,7 +207,7 @@ jobs:
 
         ## TODO switch to v2
       - name: Create GitHub Release and attach debs (if no existing release)
-        if: steps.check_release.outputs.exists != 'true'
+        if: steps.check_release.outputs.exists != 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.set_release.outputs.tag }}
@@ -175,6 +218,7 @@ jobs:
 
       - name: Bump main to next minor SNAPSHOT
         id: bump_after_release
+        if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         env:
           BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
