@@ -5,6 +5,7 @@
 
 set -e
 
+echo "Starting build of .deb packages..."
 
 # Color definitions
 RED='\033[1;31m'
