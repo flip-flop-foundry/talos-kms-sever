@@ -96,14 +96,12 @@ jobs:
           echo "Set release version $RELEASE for: ${{ github.event.pull_request.base.ref || github.ref }}"
           git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
 
-      - name: Ensure build script is executable
-        run: |
-          chmod +x buildTools/build-deb-in-docker.sh
+
       - name: Build .deb packages
         run: |
           set -euo pipefail
-          cd buildTools/
-          bash build-deb-in-docker.sh
+          chmod +x buildTools/build-deb-in-docker.sh
+          bash buildTools/build-deb-in-docker.sh
           echo "Built .deb packages; contents of target/deb-work/output/:"
           exit 1
 
