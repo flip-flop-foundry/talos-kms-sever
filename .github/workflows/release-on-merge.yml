@@ -43,6 +43,9 @@ jobs:
 #          sudo apt-get update
 #          sudo apt-get install -y maven libxml2-utils curl jq
 
+      - name: Setup Docker
+        uses: docker/setup-docker-action@v4
+
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
 
@@ -84,6 +87,7 @@ jobs:
           git config user.email "$BOT_MAIL"
           git add pom.xml
           git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
+          echo "Pushing release version $RELEASE to: ${{ github.event.pull_request.base.ref }}"
           git push origin HEAD:${{ github.event.pull_request.base.ref }}
           #git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
 
