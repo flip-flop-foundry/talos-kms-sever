@@ -38,5 +38,8 @@ fi
 
 cp target/"$JAR_NAME" "$JAR_BUILD_DIR/"
 
+echo "jar_name=$JAR_NAME" >> "$GITHUB_OUTPUT"
+echo "jar_path=$JAR_BUILD_DIR/$JAR_NAME" >> "$GITHUB_OUTPUT"
+
 echo "Finished building JAR file: $JAR_NAME"
 ls -lh "$JAR_BUILD_DIR/"
