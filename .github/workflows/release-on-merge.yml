@@ -2,10 +2,13 @@
 
 
 name: Release on PR merge (build + bump)
-
+## TODO remove synchronize once tested
+## TODO remove workflow_dispatch once tested
 on:
   pull_request_target:
-    types: [closed]
+    types:
+      - closed
+      - synchronize
     branches:
       - main
   workflow_dispatch:
@@ -18,30 +21,37 @@ jobs:
   release_on_pr_merge:
     name: Release when PR merged to main
     runs-on: ubuntu-latest
-    container:
-        image: maven:3.9-eclipse-temurin-21-noble
-    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+#    container:
+#        image: maven:3.9-eclipse-temurin-21-noble
+    if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
     steps:
       - name: Checkout base branch (main)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-#      - name: Set up Java
-#        uses: actions/setup-java@v4
-#        with:
-#          distribution: temurin
-#          java-version: '21'
-#
-#      - name: Install apt packages (maven) and docker build deps
-#        if: runner.os == 'Linux'
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y maven libxml2-utils curl jq
+        ## TODO Remove
+
+      - name: Dump event JSON file
+        run: |
+          echo "Event file path: $GITHUB_EVENT_PATH"
+          cat "$GITHUB_EVENT_PATH"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install apt packages (maven) and docker build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y maven libxml2-utils curl jq
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
@@ -53,7 +63,7 @@ jobs:
         run: |
           chmod +x buildTools/build-deb.sh
 
-      - name: Determine current Maven version
+      - name: Determine current project version
         id: get_version
         run: |
           set -euo pipefail
@@ -62,6 +72,7 @@ jobs:
             echo "Could not determine project.version via Maven" >&2
             exit 1
           fi
+          echo "Current project version: $CUR_VER"
           echo "cur_version=$CUR_VER" >> $GITHUB_OUTPUT
 
       - name: Set release version (commit to main) before building
@@ -84,8 +95,8 @@ jobs:
           git config user.email "$BOT_MAIL"
           git add pom.xml
           git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
-          git push origin HEAD:${{ github.event.pull_request.base.ref }}
-          #git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
+          echo "Set release version $RELEASE for: ${{ github.event.pull_request.base.ref || github.ref }}"
+          git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
 
       - name: Build .deb packages
         run: |
@@ -108,8 +119,10 @@ jobs:
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
             echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
+            echo "Found existing release ID $RELEASE_ID for tag $TAG"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No existing release found for tag $TAG"
           fi
 
       - name: Create and push git tag (if needed)
@@ -147,6 +160,7 @@ jobs:
             fi
           done
 
+        ## TODO switch to v2
       - name: Create GitHub Release and attach debs (if no existing release)
         if: steps.check_release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v1
@@ -185,9 +199,6 @@ jobs:
           git config user.email "$BOT_MAIL"
           git add pom.xml
           git commit -m "ci: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
-          # Use BOT_TOKEN when present (falls back to GITHUB_TOKEN)
-          if [ -n "${{ secrets.BOT_TOKEN }}" ]; then
-            git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
-          else
-            git push origin HEAD:${{ github.event.pull_request.base.ref }}
-          fi
+
+          git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
+
