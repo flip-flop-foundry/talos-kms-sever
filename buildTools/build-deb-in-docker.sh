@@ -42,6 +42,7 @@ echo "MVN finished in docker, now have these files in target/:"
 ls -l target/
 
 echo "Current dir is: $(pwd)"
+echo "I am: $(whoami)"
 
 # Clean and create working directory
 rm -rf "$DEB_BUILD_DIR"
