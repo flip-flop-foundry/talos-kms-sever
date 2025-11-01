@@ -1,12 +1,13 @@
-name: Build and push Docker image to GHCR
+name: Build and push "Builder" Docker image to GHCR
 
 on:
   push:
     # trigger when the specific Dockerfile changes
     paths:
       - 'buildTools/debBuildResources/builder/Dockerfile'
+    branches:
+      - main
   workflow_dispatch:
-    # kept manual trigger but no inputs since the file is hard-coded
 
 permissions:
   contents: read
