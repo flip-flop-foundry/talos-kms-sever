@@ -11,6 +11,7 @@ on:
       - synchronize
     branches:
       - main
+      - switchReleaseToBuiltImage
   workflow_dispatch:
 
 

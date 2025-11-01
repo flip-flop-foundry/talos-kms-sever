@@ -22,6 +22,7 @@ echo -e "${CYAN}Building $APP_NAME version: $APP_VERSION${NC}"
 
 # Directory structure
 DEB_BUILD_DIR="target/deb-work"
+BUILD_TOOLS_DIR="buildTools/"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
@@ -40,11 +41,8 @@ docker run --rm \
 
 sudo chown -R "$(id -u):$(id -g)" .
 
-echo "MVN finished in docker, now have these files in target/:"
+echo "Maven finished in docker, now have these files in target/:"
 ls -l target/
-
-echo "Current dir is: $(pwd)"
-echo "I am: $(whoami)"
 
 # Clean and create working directory
 rm -rf "$DEB_BUILD_DIR"
