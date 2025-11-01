@@ -38,6 +38,8 @@ docker run --rm \
         "$DOCKER_BUILD_IMAGE" \
         /bin/bash -c "mvn clean package"
 
+sudo chown -R "$(id -u):$(id -g)" .
+
 echo "MVN finished in docker, now have these files in target/:"
 ls -l target/
 
