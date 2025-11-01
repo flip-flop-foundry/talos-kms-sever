@@ -68,7 +68,8 @@ jobs:
             mkdir -p .cache
             echo "${OUT}=${VALUE}" >> .cache/env_vars
           done
-            echo "save-success=true" >> $GITHUB_OUTPUT
+          echo "save-success=true" >> $GITHUB_OUTPUT
+          echo "Maven metadata retrieval complete."
 
       - name: Save cache (actions/cache uploads at end for misses)
         if: steps.get_maven_metadata.output.save-success == 'true'
