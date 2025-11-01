@@ -69,12 +69,6 @@ jobs:
         run: |
           set -euo pipefail
           
-          echo First running it for diagnostics...
-          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version
-          echo And again to capture...
-          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true
-          
-          echo now for real...
           CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
           echo "Determined version: $CUR_VER"
           
