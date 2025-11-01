@@ -72,7 +72,7 @@ jobs:
           echo "Maven metadata retrieval complete."
 
       - name: Save cache (actions/cache uploads at end for misses)
-        if: steps.get_maven_metadata.output.save-success == 'true'
+        if: steps.get_maven_metadata.outputs.save-success == 'true'
         uses: actions/cache/save@v4
         with:
           path: .cache/env_vars
