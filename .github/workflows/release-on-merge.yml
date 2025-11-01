@@ -76,21 +76,35 @@ jobs:
           "project.description:DESCRIPTION"
           "project.organization.name:VENDOR"
           "project.developers.developer.email:MAINTAINER_EMAIL"
-          
           )
           
+          # Run docker once, have the container print KEY=VALUE lines to stdout,
+          # then consume them on the host to write to $GITHUB_OUTPUT and $GITHUB_ENV.
+          OUTPUT=$(docker run --rm -i -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest bash -s <<'EOF'
+          set -euo pipefail
           for entry in "${PARAMS[@]}"; do
-            IFS=':' read -r EXPR OUT <<< "$entry"
-            VALUE=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
-            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
-            echo "Determined $EXPR: $VALUE"
-            if [ -z "$VALUE" ]; then
-              echo "Could not determine $EXPR via Maven (docker)" >&2
-              exit 1
+            IFS=':' read -r EXPR OUT <<< "\$entry"
+            VALUE=\$(mvn -q -DforceStdout help:evaluate -Dexpression="\$EXPR" 2>/dev/null || true)
+            VALUE=\$(echo -n "\$VALUE" | tr -d '\r\n')
+            if [ -z "\$VALUE" ]; then
+              echo "Could not determine \$EXPR via Maven (inside docker)" >&2
+              exit 2
             fi
-            echo "${OUT}=${VALUE}" >> $GITHUB_OUTPUT
-            echo "${OUT}=${VALUE}" >> $GITHUB_ENV
+            printf '%s=%s\n' "\$OUT" "\$VALUE"
           done
+          EOF
+          ) || { echo "Docker/maven command failed"; exit 1; }
+          
+          # Process container output on the host so $GITHUB_OUTPUT and $GITHUB_ENV are written correctly
+          while IFS= read -r line; do
+            # skip empty lines
+            [ -z "\$line" ] && continue
+            key=\${line%%=*}
+            val=\${line#*=}
+            echo "Determined \${key}: \${val}"
+            echo "\${line}" >> "$GITHUB_OUTPUT"
+            echo "\${line}" >> "$GITHUB_ENV"
+          done <<< "\$OUTPUT"
 
 
       - name: Set release version (commit to main) before building

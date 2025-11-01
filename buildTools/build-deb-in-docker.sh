@@ -14,14 +14,14 @@ CYAN='\033[1;36m'
 NC='\033[0m' # No Color
 
 
+DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
 BUILD_FOR_ARCHS=("linux/amd64" "linux/arm64")
-
 MAIN_CLASS="dev.flipflopfoundy.taloskms.KMSServer"
 
 echo -e "${CYAN}Building $APP_NAME version: $APP_VERSION${NC}"
 
 # Directory structure
-BUILD_DIR="target/deb-work"
+DEB_BUILD_DIR="target/deb-work"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
@@ -29,15 +29,20 @@ WORK_DIR="$INSTALL_DIR"
 # Build the fat JAR
 echo -e "${CYAN}Building fat JAR...${NC}"
 cd ../
-mvn clean package
+
+docker run --rm \
+        -v "$PWD":/workspace -w /workspace \
+        --platform "$arch" \
+        "$DOCKER_BUILD_IMAGE" \
+        /bin/bash -c "mvn clean package"
 
 
 # Clean and create working directory
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
-mkdir -p "$BUILD_DIR/input"
-mkdir -p "$BUILD_DIR/resources"
-mkdir -p "$BUILD_DIR/output"
+rm -rf "$DEB_BUILD_DIR"
+mkdir -p "$DEB_BUILD_DIR"
+mkdir -p "$DEB_BUILD_DIR/input"
+mkdir -p "$DEB_BUILD_DIR/resources"
+mkdir -p "$DEB_BUILD_DIR/output"
 
 
 # Copy JAR to input directory
@@ -46,13 +51,13 @@ if [ ! -f "target/$JAR_NAME" ]; then
     echo "Error: JAR file not found at target/$JAR_NAME" >&2
     exit 1
 fi
-cp target/"$JAR_NAME" "$BUILD_DIR/input/"
+cp target/"$JAR_NAME" "$DEB_BUILD_DIR/input/"
 
 
 #cp -r buildTools/debBuildResources/* "$WORK_DIR/resources/"
 
 # Create systemd service file
-cat > "$BUILD_DIR/resources/$APP_NAME.service" << EOF
+cat > "$DEB_BUILD_DIR/resources/$APP_NAME.service" << EOF
 [Unit]
 Description=Talos KMS Server
 After=network.target
@@ -70,7 +75,7 @@ WantedBy=multi-user.target
 EOF
 
 # Create post-install script
-cat > "$BUILD_DIR/resources/postinst" << EOF
+cat > "$DEB_BUILD_DIR/resources/postinst" << EOF
 #!/bin/sh
 set -e
 
@@ -104,10 +109,10 @@ fi
 exit 0
 EOF
 
-chmod +x "$BUILD_DIR/resources/postinst"
+chmod +x "$DEB_BUILD_DIR/resources/postinst"
 
 # Create pre-uninstall script
-cat > "$BUILD_DIR/resources/prerm" << EOF
+cat > "$DEB_BUILD_DIR/resources/prerm" << EOF
 #!/bin/sh
 set -e
 
@@ -124,15 +129,15 @@ fi
 exit 0
 EOF
 
-chmod +x "$BUILD_DIR/resources/prerm"
+chmod +x "$DEB_BUILD_DIR/resources/prerm"
 
 
 # Copy acmeReload.sh to resources and make it executable
-cp "$BUILD_TOOLS_DIR/debBuildResources/acmeReload.sh" "$BUILD_DIR/resources/"
-chmod +x "$BUILD_DIR/resources/acmeReload.sh"
+cp "$BUILD_TOOLS_DIR/debBuildResources/acmeReload.sh" "$DEB_BUILD_DIR/resources/"
+chmod +x "$DEB_BUILD_DIR/resources/acmeReload.sh"
 
 # Create the .deb package
-cat > "$BUILD_DIR/jpackage.sh" << EOF
+cat > "$DEB_BUILD_DIR/jpackage.sh" << EOF
 echo "Creating .deb package..."
 set -x
 jpackage \
@@ -159,7 +164,7 @@ EOF
 #   --launcher-as-service \
 #   --add-launcher "${APP_NAME}_bengt=/opt/$APP_NAME/bin/$APP_NAME.properties" \
 
-chmod +x "$BUILD_DIR/jpackage.sh"
+chmod +x "$DEB_BUILD_DIR/jpackage.sh"
 
 
 
@@ -171,7 +176,7 @@ for arch in "${BUILD_FOR_ARCHS[@]}"; do
     echo -e "${CYAN}   Building for architecture: $arch${NC}"
 
     docker run --rm \
-        -v "./$BUILD_DIR:/build" \
+        -v "./$DEB_BUILD_DIR:/build" \
         --platform "$arch" \
         "$DOCKER_BUILD_IMAGE" \
         /bin/bash -c "cd /build && bash jpackage.sh"
@@ -181,7 +186,7 @@ END_TIME=$(date +%s)
 ELAPSED_TIME=$((END_TIME - START_TIME))
 echo -e "${GREEN}Build completed in $ELAPSED_TIME seconds.${NC}"
 
-echo -e "${GREEN}All done! .deb packages are in $BUILD_DIR/output${NC}"
-ls -lh "$BUILD_DIR/output"
+echo -e "${GREEN}All done! .deb packages are in $DEB_BUILD_DIR/output${NC}"
+ls -lh "$DEB_BUILD_DIR/output"
 echo -e "${NC}"
 exit 0
