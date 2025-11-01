@@ -47,8 +47,8 @@ jobs:
       - name: Install apt packages docker build deps
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y sudo
+          apt-get update
+          apt-get install -y sudo
 
       - name: Setup Docker
         uses: docker/setup-docker-action@v4
