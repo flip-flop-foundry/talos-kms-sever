@@ -8,6 +8,8 @@ on:
     types: [closed]
     branches:
       - main
+  workflow_dispatch:
+
 
 permissions:
   contents: write
@@ -16,6 +18,8 @@ jobs:
   release_on_pr_merge:
     name: Release when PR merged to main
     runs-on: ubuntu-latest
+    container:
+        image: maven:3.9-eclipse-temurin-21-noble
     if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
 
     steps:
@@ -24,20 +28,20 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
-          token: ${{ secrets.BOT_TOKEN || github.token }}
+          token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Install apt packages (maven) and docker build deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y maven libxml2-utils curl jq
+#      - name: Set up Java
+#        uses: actions/setup-java@v4
+#        with:
+#          distribution: temurin
+#          java-version: '21'
+#
+#      - name: Install apt packages (maven) and docker build deps
+#        if: runner.os == 'Linux'
+#        run: |
+#          sudo apt-get update
+#          sudo apt-get install -y maven libxml2-utils curl jq
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
@@ -81,6 +85,7 @@ jobs:
           git add pom.xml
           git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
           git push origin HEAD:${{ github.event.pull_request.base.ref }}
+          #git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
 
       - name: Build .deb packages
         run: |
@@ -95,7 +100,7 @@ jobs:
           TAG=v${{ steps.set_release.outputs.tag }}
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
           # Use the BOT_TOKEN when provided (falls back to GITHUB_TOKEN)
-          API_TOKEN=${{ secrets.BOT_TOKEN || github.token }}
+          API_TOKEN=${{ secrets.BOT_TOKEN }}
           HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer $API_TOKEN" "$API")
           if [ "$HTTP_STATUS" = "200" ]; then
             RELEASE_ID=$(jq -r .id /tmp/release_resp.json)
@@ -131,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
-          API_TOKEN=${{ secrets.BOT_TOKEN || github.token }}
+          API_TOKEN=${{ secrets.BOT_TOKEN }}
           for f in target/deb-work/output/*.deb; do
             if [ -f "$f" ]; then
               echo "Uploading $f to existing release"
@@ -150,7 +155,7 @@ jobs:
           name: v${{ steps.set_release.outputs.tag }}
           files: 'target/deb-work/output/*.deb'
         env:
-          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
 
       - name: Bump main to next minor SNAPSHOT
         id: bump_after_release
