@@ -61,11 +61,27 @@ jobs:
         run: |
           chmod +x buildTools/build-deb.sh
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.BOT_PACKAGES_TOKEN }}
+
       - name: Determine current project version
         id: get_version
         run: |
           set -euo pipefail
+          
+          echo First running it for diagnostics...
+          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version
+          echo And again to capture...
+          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true
+          
+          echo now for real...
           CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          echo "Determined version: $CUR_VER"
+          
           if [ -z "$CUR_VER" ]; then
             echo "Could not determine project.version via Maven (docker)" >&2
             exit 1
