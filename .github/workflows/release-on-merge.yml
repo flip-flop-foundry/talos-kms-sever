@@ -43,6 +43,13 @@ jobs:
 #          sudo apt-get update
 #          sudo apt-get install -y maven libxml2-utils curl jq
 
+
+      - name: Install apt packages docker build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sudo
+
       - name: Setup Docker
         uses: docker/setup-docker-action@v4
 
