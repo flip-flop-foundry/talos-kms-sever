@@ -11,6 +11,7 @@ on:
       - synchronize
     branches:
       - main
+      - switchReleaseToBuiltImage
   workflow_dispatch:
 
 
@@ -21,8 +22,7 @@ jobs:
   release_on_pr_merge:
     name: Release when PR merged to main
     runs-on: ubuntu-latest
-#    container:
-#        image: maven:3.9-eclipse-temurin-21-noble
+
     if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
     steps:
@@ -34,24 +34,12 @@ jobs:
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-        ## TODO Remove
 
       - name: Dump event JSON file
+        if: false
         run: |
-          echo "Event file path: $GITHUB_EVENT_PATH"
           cat "$GITHUB_EVENT_PATH"
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Install apt packages (maven) and docker build deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y maven libxml2-utils curl jq
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
@@ -59,36 +47,82 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Ensure build script is executable
-        run: |
-          chmod +x buildTools/build-deb.sh
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
-      - name: Determine current project version
-        id: get_version
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-env-
+
+      - name: If cache miss, get Maven project metadata
+        id: get_maven_metadata
+        if: steps.cache-restore.outputs.cache-hit != 'true'
         run: |
-          set -euo pipefail
-          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
-          if [ -z "$CUR_VER" ]; then
-            echo "Could not determine project.version via Maven" >&2
-            exit 1
-          fi
-          echo "Current project version: $CUR_VER"
-          echo "cur_version=$CUR_VER" >> $GITHUB_OUTPUT
+          
+          PARAMS=(
+          "project.version:MAVEN_VERSION"
+          "project.artifactId:APP_NAME"
+          "project.description:DESCRIPTION"
+          "project.organization.name:VENDOR"
+          "project.developers[0].email:MAINTAINER_EMAIL"
+
+          )
+          
+          for entry in "${PARAMS[@]}"; do
+            IFS=':' read -r EXPR OUT <<< "$entry"
+            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
+            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
+            echo "Determined $EXPR: $VALUE"
+            if [ -z "$VALUE" ]; then
+              echo "Could not determine $EXPR via Maven (docker)" >&2
+              exit 1
+            fi
+            mkdir -p .cache
+            echo "${OUT}=${VALUE}" >> .cache/env_vars
+          done
+            echo "save-success=true" >> $GITHUB_OUTPUT
+
+      - name: Load cached env file into GITHUB_ENV
+        run: |
+          while IFS= read -r line; do
+            # handle CRLF if needed:
+            line=${line%$'\r'}
+            echo "$line" >> $GITHUB_ENV
+          done < ".cache/env_vars"
+
+      - name: Save cache (actions/cache uploads at end for misses)
+        if: steps.get_maven_metadata.save-success == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+
 
       - name: Set release version (commit to main) before building
         id: set_release
+        if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         env:
           BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
         run: |
           set -euo pipefail
-          CUR=${{ steps.get_version.outputs.cur_version }}
+          CUR=${{ steps.get_maven_metadata.outputs.MAVEN_VERSION }}
           RELEASE=${CUR%-SNAPSHOT}
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
           echo "tag=$RELEASE" >> $GITHUB_OUTPUT
 
           # Use Maven versions plugin to set the release version
-          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
+          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
+          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
 
           # Commit and push the release version to main so build operates on the released POM
           git config user.name "$BOT_USERNAME"
@@ -98,11 +132,14 @@ jobs:
           echo "Set release version $RELEASE for: ${{ github.event.pull_request.base.ref || github.ref }}"
           git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
 
+
       - name: Build .deb packages
         run: |
           set -euo pipefail
-          cd buildTools/
-          bash build-deb.sh
+          chmod +x buildTools/build-deb-in-docker.sh
+          bash buildTools/build-deb-in-docker.sh
+          echo "Built .deb packages; contents of target/deb-work/output/:"
+
 
       - name: Check for existing GitHub Release for this tag
         id: check_release
@@ -126,7 +163,7 @@ jobs:
           fi
 
       - name: Create and push git tag (if needed)
-        if: steps.check_release.outputs.exists != 'true'
+        if: steps.check_release.outputs.exists != 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         env:
           BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
@@ -145,7 +182,7 @@ jobs:
           fi
 
       - name: Upload debs to existing release (if present)
-        if: steps.check_release.outputs.exists == 'true'
+        if: steps.check_release.outputs.exists == 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         run: |
           set -euo pipefail
           UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
@@ -162,7 +199,7 @@ jobs:
 
         ## TODO switch to v2
       - name: Create GitHub Release and attach debs (if no existing release)
-        if: steps.check_release.outputs.exists != 'true'
+        if: steps.check_release.outputs.exists != 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.set_release.outputs.tag }}
@@ -173,6 +210,7 @@ jobs:
 
       - name: Bump main to next minor SNAPSHOT
         id: bump_after_release
+        if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
         env:
           BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
@@ -180,7 +218,8 @@ jobs:
           set -euo pipefail
 
           # Read current version via maven (should reflect the just-committed release version)
-          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          #CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
           if [ -z "$CUR_VER" ]; then
             echo "Could not determine current version for bump" >&2
             exit 1
@@ -193,7 +232,8 @@ jobs:
           NEW_VERSION="${MAJ}.${NEW_MIN}-SNAPSHOT"
 
           echo "Setting new project version to $NEW_VERSION"
-          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
 
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"

@@ -14,101 +14,42 @@ CYAN='\033[1;36m'
 NC='\033[0m' # No Color
 
 
-
-
-
+DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
 BUILD_FOR_ARCHS=("linux/amd64" "linux/arm64")
-# Build configuration
-DOCKER_BUILD_IMAGE="talos-kms-build:latest"
-# Get artifactId and version from pom.xml
-
-BUILD_TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-
-POM_FILE="../pom.xml"
-if [ ! -f "$POM_FILE" ]; then
-    echo -e "${RED}Error: pom.xml not found at $POM_FILE${NC}" >&2
-    exit 1
-fi
-APP_NAME=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='artifactId']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$APP_NAME" ]; then
-    echo -e "${RED}Error: Could not parse artifactId from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-MAVEN_VERSION=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='version']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$MAVEN_VERSION" ]; then
-    echo -e "${RED}Error: Could not parse version from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-# Remove -SNAPSHOT from version if present
-APP_VERSION=${MAVEN_VERSION%-SNAPSHOT}
-
-
-# Get VENDOR, DESCRIPTION, and MAINTAINER_EMAIL from pom.xml
-VENDOR=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='organization']/*[local-name()='name']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$VENDOR" ]; then
-    echo -e "${RED}Error: Could not parse organization name (VENDOR) from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-DESCRIPTION=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='description']/text()" "$POM_FILE" 2>/dev/null | tr -d '\n' | sed 's/^ *//;s/ *$//')
-if [ -z "$DESCRIPTION" ]; then
-    echo -e "${RED}Error: Could not parse description from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-
-MAINTAINER_EMAIL=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='developers']/*[local-name()='developer'][1]/*[local-name()='email']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$MAINTAINER_EMAIL" ]; then
-    echo -e "${RED}Error: Could not parse maintainer email from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-
 MAIN_CLASS="dev.flipflopfoundy.taloskms.KMSServer"
 
-echo -e "${CYAN}Building $APP_NAME version: $APP_VERSION${NC}"
+echo -e "${CYAN}Building $APP_NAME version: $MAVEN_VERSION${NC}"
 
 # Directory structure
-BUILD_DIR="target/deb-work"
+DEB_BUILD_DIR="target/deb-work"
+BUILD_TOOLS_DIR="buildTools/"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
 
-
-DOCKER_ARCHS=""
-for arch in "${BUILD_FOR_ARCHS[@]}"; do
-    if [ -z "$DOCKER_ARCHS" ]; then
-        DOCKER_ARCHS="$arch"
-    else
-        DOCKER_ARCHS="$DOCKER_ARCHS,$arch"
-    fi
-done
-
-# Function to use podman if available, otherwise docker
-container() {
-    if command -v podman >/dev/null 2>&1; then
-        podman "$@"
-    else
-        docker "$@"
-    fi
-}
-
-echo -e "${CYAN}Building custom Docker image for building .deb packages...${NC}"
-
-container build --manifest "$DOCKER_BUILD_IMAGE" -f "$BUILD_TOOLS_DIR/debBuildResources/builder/Dockerfile" --platform "$DOCKER_ARCHS" .
-
-
-
 # Build the fat JAR
 echo -e "${CYAN}Building fat JAR...${NC}"
-cd ../
-mvn clean package
+echo "In current dir: $(pwd)"
+ls -l
+#cd ../
 
+docker run --rm \
+        -v "$PWD":/workspace -w /workspace \
+        --platform "$arch" \
+        "$DOCKER_BUILD_IMAGE" \
+        /bin/bash -c "mvn clean package"
+
+sudo chown -R "$(id -u):$(id -g)" .
+
+echo "Maven finished in docker, now have these files in target/:"
+ls -l target/
 
 # Clean and create working directory
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
-mkdir -p "$BUILD_DIR/input"
-mkdir -p "$BUILD_DIR/resources"
-mkdir -p "$BUILD_DIR/output"
+rm -rf "$DEB_BUILD_DIR"
+mkdir -p "$DEB_BUILD_DIR"
+mkdir -p "$DEB_BUILD_DIR/input"
+mkdir -p "$DEB_BUILD_DIR/resources"
+mkdir -p "$DEB_BUILD_DIR/output"
 
 
 # Copy JAR to input directory
@@ -117,13 +58,13 @@ if [ ! -f "target/$JAR_NAME" ]; then
     echo "Error: JAR file not found at target/$JAR_NAME" >&2
     exit 1
 fi
-cp target/"$JAR_NAME" "$BUILD_DIR/input/"
+cp target/"$JAR_NAME" "$DEB_BUILD_DIR/input/"
 
 
 #cp -r buildTools/debBuildResources/* "$WORK_DIR/resources/"
 
 # Create systemd service file
-cat > "$BUILD_DIR/resources/$APP_NAME.service" << EOF
+cat > "$DEB_BUILD_DIR/resources/$APP_NAME.service" << EOF
 [Unit]
 Description=Talos KMS Server
 After=network.target
@@ -141,7 +82,7 @@ WantedBy=multi-user.target
 EOF
 
 # Create post-install script
-cat > "$BUILD_DIR/resources/postinst" << EOF
+cat > "$DEB_BUILD_DIR/resources/postinst" << EOF
 #!/bin/sh
 set -e
 
@@ -175,10 +116,10 @@ fi
 exit 0
 EOF
 
-chmod +x "$BUILD_DIR/resources/postinst"
+chmod +x "$DEB_BUILD_DIR/resources/postinst"
 
 # Create pre-uninstall script
-cat > "$BUILD_DIR/resources/prerm" << EOF
+cat > "$DEB_BUILD_DIR/resources/prerm" << EOF
 #!/bin/sh
 set -e
 
@@ -195,21 +136,21 @@ fi
 exit 0
 EOF
 
-chmod +x "$BUILD_DIR/resources/prerm"
+chmod +x "$DEB_BUILD_DIR/resources/prerm"
 
 
 # Copy acmeReload.sh to resources and make it executable
-cp "$BUILD_TOOLS_DIR/debBuildResources/acmeReload.sh" "$BUILD_DIR/resources/"
-chmod +x "$BUILD_DIR/resources/acmeReload.sh"
+cp "$BUILD_TOOLS_DIR/debBuildResources/acmeReload.sh" "$DEB_BUILD_DIR/resources/"
+chmod +x "$DEB_BUILD_DIR/resources/acmeReload.sh"
 
 # Create the .deb package
-cat > "$BUILD_DIR/jpackage.sh" << EOF
+cat > "$DEB_BUILD_DIR/jpackage.sh" << EOF
 echo "Creating .deb package..."
 set -x
 jpackage \
   --type deb \
   --name "${APP_NAME}" \
-  --app-version "$APP_VERSION" \
+  --app-version "$MAVEN_VERSION" \
   --vendor "$VENDOR" \
   --description "$DESCRIPTION" \
   --input "/build/input" \
@@ -230,7 +171,7 @@ EOF
 #   --launcher-as-service \
 #   --add-launcher "${APP_NAME}_bengt=/opt/$APP_NAME/bin/$APP_NAME.properties" \
 
-chmod +x "$BUILD_DIR/jpackage.sh"
+chmod +x "$DEB_BUILD_DIR/jpackage.sh"
 
 
 
@@ -241,8 +182,8 @@ START_TIME=$(date +%s)
 for arch in "${BUILD_FOR_ARCHS[@]}"; do
     echo -e "${CYAN}   Building for architecture: $arch${NC}"
 
-    container run --rm \
-        -v "./$BUILD_DIR:/build" \
+    docker run --rm \
+        -v "./$DEB_BUILD_DIR:/build" \
         --platform "$arch" \
         "$DOCKER_BUILD_IMAGE" \
         /bin/bash -c "cd /build && bash jpackage.sh"
@@ -252,7 +193,7 @@ END_TIME=$(date +%s)
 ELAPSED_TIME=$((END_TIME - START_TIME))
 echo -e "${GREEN}Build completed in $ELAPSED_TIME seconds.${NC}"
 
-echo -e "${GREEN}All done! .deb packages are in $BUILD_DIR/output${NC}"
-ls -lh "$BUILD_DIR/output"
+echo -e "${GREEN}All done! .deb packages are in $DEB_BUILD_DIR/output${NC}"
+ls -lh "$DEB_BUILD_DIR/output"
 echo -e "${NC}"
 exit 0
