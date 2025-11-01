@@ -18,7 +18,7 @@ DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
 BUILD_FOR_ARCHS=("linux/amd64" "linux/arm64")
 MAIN_CLASS="dev.flipflopfoundy.taloskms.KMSServer"
 
-echo -e "${CYAN}Building $APP_NAME version: $APP_VERSION${NC}"
+echo -e "${CYAN}Building $APP_NAME version: $MAVEN_VERSION${NC}"
 
 # Directory structure
 DEB_BUILD_DIR="target/deb-work"
@@ -150,7 +150,7 @@ set -x
 jpackage \
   --type deb \
   --name "${APP_NAME}" \
-  --app-version "$APP_VERSION" \
+  --app-version "$MAVEN_VERSION" \
   --vendor "$VENDOR" \
   --description "$DESCRIPTION" \
   --input "/build/input" \
