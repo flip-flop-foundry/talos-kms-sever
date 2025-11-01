@@ -1,10 +1,13 @@
 # Merged release workflow: on PR merge to main, build debs, create tag/release, then bump main to next minor SNAPSHOT
 
+
 name: Release on PR merge (build + bump)
 
 on:
   pull_request_target:
     types: [closed]
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -21,7 +24,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BOT_TOKEN || github.token }}
           persist-credentials: true
 
       - name: Set up Java
@@ -70,8 +73,8 @@ jobs:
           mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
 
           # Commit and push the release version to main so build operates on the released POM
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
           git add pom.xml
           git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
           git push origin HEAD:${{ github.event.pull_request.base.ref }}
@@ -88,7 +91,9 @@ jobs:
           set -euo pipefail
           TAG=v${{ steps.set_release.outputs.tag }}
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-          HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$API")
+          # Use the BOT_TOKEN when provided (falls back to GITHUB_TOKEN)
+          API_TOKEN=${{ secrets.BOT_TOKEN || github.token }}
+          HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer $API_TOKEN" "$API")
           if [ "$HTTP_STATUS" = "200" ]; then
             RELEASE_ID=$(jq -r .id /tmp/release_resp.json)
             UPLOAD_URL=$(jq -r .upload_url /tmp/release_resp.json | sed -e 's/{?name,label}//')
@@ -104,8 +109,8 @@ jobs:
         run: |
           set -euo pipefail
           TAG=v${{ steps.set_release.outputs.tag }}
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
           git fetch --prune --tags origin
           if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
             echo "Tag $TAG already exists on remote; skipping tag creation"
@@ -119,12 +124,13 @@ jobs:
         if: steps.check_release.outputs.exists == 'true'
         run: |
           set -euo pipefail
-          UPLOAD_URL="${{ steps.check_release.outputs.upload_url }}"
+          UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
+          API_TOKEN=${{ secrets.BOT_TOKEN || github.token }}
           for f in target/deb-work/output/*.deb; do
             if [ -f "$f" ]; then
               echo "Uploading $f to existing release"
               curl -sSL -X POST "$UPLOAD_URL?name=$(basename "$f")" \
-                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Authorization: Bearer $API_TOKEN" \
                 -H "Content-Type: application/octet-stream" \
                 --data-binary @"$f" || echo "Warning: upload of $f failed"
             fi
@@ -138,7 +144,7 @@ jobs:
           name: v${{ steps.set_release.outputs.tag }}
           files: 'target/deb-work/output/*.deb'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN || github.token }}
 
       - name: Bump main to next minor SNAPSHOT
         id: bump_after_release
@@ -161,8 +167,13 @@ jobs:
           echo "Setting new project version to $NEW_VERSION"
           mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
           git add pom.xml
           git commit -m "ci: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
-          git push origin HEAD:${{ github.event.pull_request.base.ref }}
+          # Use BOT_TOKEN when present (falls back to GITHUB_TOKEN)
+          if [ -n "${{ secrets.BOT_TOKEN }}" ]; then
+            git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
+          else
+            git push origin HEAD:${{ github.event.pull_request.base.ref }}
+          fi
