@@ -1,0 +1,42 @@
+
+set -e
+
+echo "Starting build of .deb packages..."
+
+# Color definitions
+CYAN='\033[1;36m'
+NC='\033[0m' # No Color
+
+
+DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
+
+
+echo -e "${CYAN}Building $APP_NAME version: $MAVEN_VERSION${NC}"
+
+# Directory structure
+JAR_BUILD_DIR="target/jar-build/output/"
+mkdir -p JAR_BUILD_DIR
+
+# Build the fat JAR
+echo -e "${CYAN}Building fat JAR...${NC}"
+echo "In current dir: $(pwd)"
+ls -l
+#cd ../
+
+docker run --rm \
+        -v "$PWD":/workspace -w /workspace \
+        "$DOCKER_BUILD_IMAGE" \
+        /bin/bash -c "mvn clean package"
+
+sudo chown -R "$(id -u):$(id -g)" .
+
+JAR_NAME="$APP_NAME-$MAVEN_VERSION.jar"
+if [ ! -f "target/$JAR_NAME" ]; then
+    echo "Error: JAR file not found at target/$JAR_NAME" >&2
+    exit 1
+fi
+
+cp target/"$JAR_NAME" "$JAR_BUILD_DIR/"
+
+echo "Finished building JAR file: $JAR_NAME"
+ls -lh "$JAR_BUILD_DIR/"

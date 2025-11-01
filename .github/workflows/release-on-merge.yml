@@ -1,7 +1,7 @@
 # Merged release workflow: on PR merge to main, build debs, create tag/release, then bump main to next minor SNAPSHOT
 
 
-name: Release on PR merge (build + bump)
+name: Build and Release on PR Merge to main
 ## TODO remove synchronize once tested
 ## TODO remove workflow_dispatch once tested
 on:
@@ -11,7 +11,7 @@ on:
       - synchronize
     branches:
       - main
-      - switchReleaseToBuiltImage
+      - addingMatrixToWorkflow
   workflow_dispatch:
 
 
@@ -19,11 +19,10 @@ permissions:
   contents: write
 
 jobs:
-  release_on_pr_merge:
-    name: Release when PR merged to main
-    runs-on: ubuntu-latest
 
-    if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
+  get_maven_metadata:
+    name: Get Maven project metadata
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout base branch (main)
@@ -33,26 +32,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
-
-
-      - name: Dump event JSON file
-        if: false
-        run: |
-          cat "$GITHUB_EVENT_PATH"
-
-
-      - name: Set up QEMU emulation (for multi-arch builds)
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
       - name: Restore cached env file
         id: cache-restore
@@ -67,7 +46,7 @@ jobs:
         id: get_maven_metadata
         if: steps.cache-restore.outputs.cache-hit != 'true'
         run: |
-          
+
           PARAMS=(
           "project.version:MAVEN_VERSION"
           "project.artifactId:APP_NAME"
@@ -76,7 +55,7 @@ jobs:
           "project.developers[0].email:MAINTAINER_EMAIL"
 
           )
-          
+
           for entry in "${PARAMS[@]}"; do
             IFS=':' read -r EXPR OUT <<< "$entry"
             VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
@@ -91,6 +70,38 @@ jobs:
           done
             echo "save-success=true" >> $GITHUB_OUTPUT
 
+      - name: Save cache (actions/cache uploads at end for misses)
+        if: steps.get_maven_metadata.output.save-success == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+
+
+  build_jar:
+    name: Build JAR file
+    runs-on: ubuntu-latest
+    needs: get_maven_metadata
+
+    if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - name: Checkout base branch (main)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}
+          persist-credentials: true
+
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          fail-on-cache-miss: true
+
       - name: Load cached env file into GITHUB_ENV
         run: |
           while IFS= read -r line; do
@@ -98,14 +109,6 @@ jobs:
             line=${line%$'\r'}
             echo "$line" >> $GITHUB_ENV
           done < ".cache/env_vars"
-
-      - name: Save cache (actions/cache uploads at end for misses)
-        if: steps.get_maven_metadata.save-success == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .cache/env_vars
-          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
-
 
       - name: Set release version (commit to main) before building
         id: set_release
@@ -115,31 +118,47 @@ jobs:
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
         run: |
           set -euo pipefail
-          CUR=${{ steps.get_maven_metadata.outputs.MAVEN_VERSION }}
+          CUR="$MAVEN_VERSION"
           RELEASE=${CUR%-SNAPSHOT}
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
           echo "tag=$RELEASE" >> $GITHUB_OUTPUT
 
           # Use Maven versions plugin to set the release version
-          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
           docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
 
           # Commit and push the release version to main so build operates on the released POM
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
           git add pom.xml
-          git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
+          git commit -m "Bot: set maven project version to $RELEASE for branch ${{ github.event.pull_request.base.ref || github.ref }}" || echo "No changes to commit"
           echo "Set release version $RELEASE for: ${{ github.event.pull_request.base.ref || github.ref }}"
           git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
 
 
-      - name: Build .deb packages
+      - name: Build .jar file
         run: |
           set -euo pipefail
-          chmod +x buildTools/build-deb-in-docker.sh
-          bash buildTools/build-deb-in-docker.sh
-          echo "Built .deb packages; contents of target/deb-work/output/:"
+          chmod +x buildTools/build-jar.sh
+          bash buildTools/build-jar.sh
+          echo "Built .jar files:"
+          ls -l target/*.jar
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: built-jar
+          path: target/jar-build/output/*.jar
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  ignore:
+    name: Ignore for now
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - name: Set up QEMU emulation (for multi-arch builds)
+        uses: docker/setup-qemu-action@v2
 
       - name: Check for existing GitHub Release for this tag
         id: check_release
