@@ -87,6 +87,7 @@ jobs:
               echo "Could not determine $EXPR via Maven (docker)" >&2
               exit 1
             fi
+            mkdir .cache
             echo "${OUT}=${VALUE}" >> .cache/env_vars
           done
 #          cd buildTools/
