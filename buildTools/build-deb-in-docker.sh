@@ -28,7 +28,9 @@ WORK_DIR="$INSTALL_DIR"
 
 # Build the fat JAR
 echo -e "${CYAN}Building fat JAR...${NC}"
-cd ../
+echo "In current dir: $(pwd)"
+ls -l
+#cd ../
 
 docker run --rm \
         -v "$PWD":/workspace -w /workspace \
@@ -36,6 +38,10 @@ docker run --rm \
         "$DOCKER_BUILD_IMAGE" \
         /bin/bash -c "mvn clean package"
 
+echo "MVN finished in docker, now have these files in target/:"
+ls -l target/
+
+echo "Current dir is: $(pwd)"
 
 # Clean and create working directory
 rm -rf "$DEB_BUILD_DIR"

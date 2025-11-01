@@ -98,7 +98,7 @@ jobs:
 
       - name: Ensure build script is executable
         run: |
-          chmod +x buildTools/build-deb.sh
+          chmod +x buildTools/build-deb-in-docker.sh
       - name: Build .deb packages
         run: |
           set -euo pipefail
