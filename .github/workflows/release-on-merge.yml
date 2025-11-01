@@ -21,8 +21,7 @@ jobs:
   release_on_pr_merge:
     name: Release when PR merged to main
     runs-on: ubuntu-latest
-#    container:
-#        image: maven:3.9-eclipse-temurin-21-noble
+
     if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
     steps:
@@ -34,24 +33,23 @@ jobs:
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-        ## TODO Remove
 
       - name: Dump event JSON file
+        if: false
         run: |
-          echo "Event file path: $GITHUB_EVENT_PATH"
           cat "$GITHUB_EVENT_PATH"
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Install apt packages (maven) and docker build deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y maven libxml2-utils curl jq
+#      - name: Set up Java
+#        uses: actions/setup-java@v4
+#        with:
+#          distribution: temurin
+#          java-version: '21'
+#
+#      - name: Install apt packages (maven) and docker build deps
+#        if: runner.os == 'Linux'
+#        run: |
+#          sudo apt-get update
+#          sudo apt-get install -y maven libxml2-utils curl jq
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
@@ -67,9 +65,9 @@ jobs:
         id: get_version
         run: |
           set -euo pipefail
-          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
           if [ -z "$CUR_VER" ]; then
-            echo "Could not determine project.version via Maven" >&2
+            echo "Could not determine project.version via Maven (docker)" >&2
             exit 1
           fi
           echo "Current project version: $CUR_VER"
@@ -88,7 +86,8 @@ jobs:
           echo "tag=$RELEASE" >> $GITHUB_OUTPUT
 
           # Use Maven versions plugin to set the release version
-          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
+          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
+          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
 
           # Commit and push the release version to main so build operates on the released POM
           git config user.name "$BOT_USERNAME"
@@ -180,7 +179,8 @@ jobs:
           set -euo pipefail
 
           # Read current version via maven (should reflect the just-committed release version)
-          CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          #CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
           if [ -z "$CUR_VER" ]; then
             echo "Could not determine current version for bump" >&2
             exit 1
@@ -193,7 +193,8 @@ jobs:
           NEW_VERSION="${MAJ}.${NEW_MIN}-SNAPSHOT"
 
           echo "Setting new project version to $NEW_VERSION"
-          mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
 
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
