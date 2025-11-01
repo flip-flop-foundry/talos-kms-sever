@@ -14,7 +14,7 @@ DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
 echo -e "${CYAN}Building $APP_NAME version: $MAVEN_VERSION${NC}"
 
 # Directory structure
-JAR_BUILD_DIR="target/jar-build/output/"
+JAR_BUILD_DIR="target/jar-build/output"
 mkdir -p JAR_BUILD_DIR
 
 # Build the fat JAR
