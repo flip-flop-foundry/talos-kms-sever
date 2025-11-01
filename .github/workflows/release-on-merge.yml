@@ -6,6 +6,7 @@ name: Release on PR merge (build + bump)
 on:
   pull_request_target:
     types: [closed]
+    types: [closed, synchronize]
     branches:
       - main
   workflow_dispatch:
@@ -26,7 +27,7 @@ jobs:
       - name: Checkout base branch (main)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
@@ -97,9 +98,9 @@ jobs:
           git config user.email "$BOT_MAIL"
           git add pom.xml
           git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
-          echo "Pushing release version $RELEASE to: ${{ github.event.pull_request.base.ref }}"
-          git push origin HEAD:${{ github.event.pull_request.base.ref }}
-          #git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
+          echo "Pushing release version $RELEASE to: ${{ github.event.pull_request.base.ref || github.ref }}"
+          git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
+          #git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref || github.ref }}
 
       - name: Build .deb packages
         run: |
@@ -201,7 +202,7 @@ jobs:
           git commit -m "ci: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
           # Use BOT_TOKEN when present (falls back to GITHUB_TOKEN)
           if [ -n "${{ secrets.BOT_TOKEN }}" ]; then
-            git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref }}
+            git push https://x-access-token:${{ secrets.BOT_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.event.pull_request.base.ref || github.ref }}
           else
-            git push origin HEAD:${{ github.event.pull_request.base.ref }}
+            git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
           fi
