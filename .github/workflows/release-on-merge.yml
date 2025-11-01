@@ -2,18 +2,15 @@
 
 
 name: Release on PR merge (build + bump)
-
+## TODO remove synchronize once tested
+## TODO remove workflow_dispatch once tested
 on:
   pull_request_target:
-    ## TODO remove synchronize once tested
-
-
     types:
       - closed
       - synchronize
     branches:
       - main
-  ## TODO remove synchronize once tested
   workflow_dispatch:
 
 
