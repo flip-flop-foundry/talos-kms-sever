@@ -65,19 +65,33 @@ jobs:
           password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
       - name: Determine current project version
-        id: get_version
+        id: get_maven_metadata
         run: |
+
           set -euo pipefail
           
-          CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
-          echo "Determined version: $CUR_VER"
+          PARAMS=(
+          "project.version:MAVEN_VERSION"
+          "project.artifactId:APP_NAME"
+          "project.description:DESCRIPTION"
+          "project.organization.name:VENDOR"
+          "project.developers.email:MAINTAINER_EMAIL"
           
-          if [ -z "$CUR_VER" ]; then
-            echo "Could not determine project.version via Maven (docker)" >&2
-            exit 1
-          fi
-          echo "Current project version: $CUR_VER"
-          echo "cur_version=$CUR_VER" >> $GITHUB_OUTPUT
+          )
+          
+          for entry in "${PARAMS[@]}"; do
+            IFS=':' read -r EXPR OUT <<< "$entry"
+            VALUE=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
+            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
+            echo "Determined $EXPR: $VALUE"
+            if [ -z "$VALUE" ]; then
+              echo "Could not determine $EXPR via Maven (docker)" >&2
+              exit 1
+            fi
+            echo "${OUT}=${VALUE}" >> $GITHUB_OUTPUT
+            echo "${OUT}=${VALUE}" >> $GITHUB_ENV
+          done
+
 
       - name: Set release version (commit to main) before building
         id: set_release
@@ -86,7 +100,7 @@ jobs:
           BOT_MAIL: ${{ vars.BOT_MAIL  }}
         run: |
           set -euo pipefail
-          CUR=${{ steps.get_version.outputs.cur_version }}
+          CUR=${{ steps.get_maven_metadata.outputs.MAVEN_VERSION }}
           RELEASE=${CUR%-SNAPSHOT}
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
           echo "tag=$RELEASE" >> $GITHUB_OUTPUT
@@ -110,7 +124,9 @@ jobs:
         run: |
           set -euo pipefail
           cd buildTools/
-          bash build-deb.sh
+          bash build-deb-in-docker.sh
+          echo "Built .deb packages; contents of target/deb-work/output/:"
+          exit 1
 
       - name: Check for existing GitHub Release for this tag
         id: check_release

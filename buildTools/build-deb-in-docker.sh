@@ -14,53 +14,7 @@ CYAN='\033[1;36m'
 NC='\033[0m' # No Color
 
 
-
-
-
 BUILD_FOR_ARCHS=("linux/amd64" "linux/arm64")
-# Build configuration
-DOCKER_BUILD_IMAGE="talos-kms-build:latest"
-# Get artifactId and version from pom.xml
-
-BUILD_TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-
-POM_FILE="../pom.xml"
-if [ ! -f "$POM_FILE" ]; then
-    echo -e "${RED}Error: pom.xml not found at $POM_FILE${NC}" >&2
-    exit 1
-fi
-APP_NAME=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='artifactId']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$APP_NAME" ]; then
-    echo -e "${RED}Error: Could not parse artifactId from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-MAVEN_VERSION=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='version']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$MAVEN_VERSION" ]; then
-    echo -e "${RED}Error: Could not parse version from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-# Remove -SNAPSHOT from version if present
-APP_VERSION=${MAVEN_VERSION%-SNAPSHOT}
-
-
-# Get VENDOR, DESCRIPTION, and MAINTAINER_EMAIL from pom.xml
-VENDOR=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='organization']/*[local-name()='name']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$VENDOR" ]; then
-    echo -e "${RED}Error: Could not parse organization name (VENDOR) from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-DESCRIPTION=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='description']/text()" "$POM_FILE" 2>/dev/null | tr -d '\n' | sed 's/^ *//;s/ *$//')
-if [ -z "$DESCRIPTION" ]; then
-    echo -e "${RED}Error: Could not parse description from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
-
-MAINTAINER_EMAIL=$(xmllint --xpath "/*[local-name()='project']/*[local-name()='developers']/*[local-name()='developer'][1]/*[local-name()='email']/text()" "$POM_FILE" 2>/dev/null)
-if [ -z "$MAINTAINER_EMAIL" ]; then
-    echo -e "${RED}Error: Could not parse maintainer email from pom.xml. Exiting.${NC}" >&2
-    exit 1
-fi
 
 MAIN_CLASS="dev.flipflopfoundy.taloskms.KMSServer"
 
@@ -73,28 +27,9 @@ CONFIG_DIR="/etc/$APP_NAME"
 WORK_DIR="$INSTALL_DIR"
 
 
-DOCKER_ARCHS=""
-for arch in "${BUILD_FOR_ARCHS[@]}"; do
-    if [ -z "$DOCKER_ARCHS" ]; then
-        DOCKER_ARCHS="$arch"
-    else
-        DOCKER_ARCHS="$DOCKER_ARCHS,$arch"
-    fi
-done
-
-# Function to use podman if available, otherwise docker
-container() {
-    if command -v podman >/dev/null 2>&1; then
-        podman "$@"
-    else
-        docker "$@"
-    fi
-}
-
-echo -e "${CYAN}Building custom Docker image for building .deb packages...${NC}"
-
-container build --manifest "$DOCKER_BUILD_IMAGE" -f "$BUILD_TOOLS_DIR/debBuildResources/builder/Dockerfile" --platform "$DOCKER_ARCHS" .
-
+echo -e "${CYAN}Building fat JAR...${NC}"
+cd ../
+mvn clean package
 
 
 # Build the fat JAR
@@ -241,7 +176,7 @@ START_TIME=$(date +%s)
 for arch in "${BUILD_FOR_ARCHS[@]}"; do
     echo -e "${CYAN}   Building for architecture: $arch${NC}"
 
-    container run --rm \
+    docker run --rm \
         -v "./$BUILD_DIR:/build" \
         --platform "$arch" \
         "$DOCKER_BUILD_IMAGE" \
