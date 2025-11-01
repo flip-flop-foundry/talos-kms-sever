@@ -76,7 +76,9 @@ jobs:
           "project.developers[0].email:MAINTAINER_EMAIL"
 
           )
-          cd ../
+          
+          echo "In dir: $(pwd)"
+          ls -l
 
           for entry in "${PARAMS[@]}"; do
             IFS=':' read -r EXPR OUT <<< "$entry"
