@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
         image: maven:3.9-eclipse-temurin-21-noble
-    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
     steps:
       - name: Checkout base branch (main)
