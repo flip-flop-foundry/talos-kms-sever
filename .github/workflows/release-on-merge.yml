@@ -39,12 +39,6 @@ jobs:
           echo "Event file path: $GITHUB_EVENT_PATH"
           cat "$GITHUB_EVENT_PATH"
 
-      - name: Print github.context.payload (github-script)
-        uses: actions/github-script@v7
-        with:
-          script: |
-            console.log(JSON.stringify(github.context.payload, null, 2))
-
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
