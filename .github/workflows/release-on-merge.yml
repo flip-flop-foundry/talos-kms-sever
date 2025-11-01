@@ -137,6 +137,12 @@ jobs:
           echo "Set release version $RELEASE for: ${{ github.event.pull_request.base.ref || github.ref }}"
           git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
       - name: Build .jar file
         run: |
