@@ -5,13 +5,15 @@ name: Release on PR merge (build + bump)
 
 on:
   pull_request_target:
-    types: [closed]
-    types: [closed, synchronize]
+    ## TODO remove synchronize once tested
+
+
     types:
       - closed
       - synchronize
     branches:
       - main
+  ## TODO remove synchronize once tested
   workflow_dispatch:
 
 
@@ -159,6 +161,7 @@ jobs:
             fi
           done
 
+        ## TODO switch to v2
       - name: Create GitHub Release and attach debs (if no existing release)
         if: steps.check_release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v1
