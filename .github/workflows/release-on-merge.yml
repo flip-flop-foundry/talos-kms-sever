@@ -18,8 +18,8 @@ jobs:
   release_on_pr_merge:
     name: Release when PR merged to main
     runs-on: ubuntu-latest
-    container:
-        image: maven:3.9-eclipse-temurin-21-noble
+#    container:
+#        image: maven:3.9-eclipse-temurin-21-noble
     if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
     steps:
@@ -31,27 +31,17 @@ jobs:
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-#      - name: Set up Java
-#        uses: actions/setup-java@v4
-#        with:
-#          distribution: temurin
-#          java-version: '21'
-#
-#      - name: Install apt packages (maven) and docker build deps
-#        if: runner.os == 'Linux'
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y maven libxml2-utils curl jq
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
-
-      - name: Install apt packages docker build deps
+      - name: Install apt packages (maven) and docker build deps
         if: runner.os == 'Linux'
         run: |
-          apt-get update
-          apt-get install -y sudo
-
-      - name: Setup Docker
-        uses: docker/setup-docker-action@v4
+          sudo apt-get update
+          sudo apt-get install -y maven libxml2-utils curl jq
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
