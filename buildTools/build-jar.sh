@@ -11,6 +11,7 @@ NC='\033[0m' # No Color
 DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
 
 
+
 echo -e "${CYAN}Building $APP_NAME version: $MAVEN_VERSION${NC}"
 
 # Directory structure

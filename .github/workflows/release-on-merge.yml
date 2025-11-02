@@ -211,11 +211,17 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: built-jar
-          path: target/jar-build/output/
+          path: target/deb-work/
 
-      - name: List files
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.BOT_PACKAGES_TOKEN }}
+
+      - name: Build deb file for ${{ matrix.arch }}
         env:
-          MATRIX_ARCH: ${{ matrix.arch }}
           JAR_NAME: ${{ needs.build_jar.outputs.jar_name || '' }}
           JAR_PATH: ${{ needs.build_jar.outputs.jar_path || '' }}
           ARCH: ${{ matrix.arch }}
