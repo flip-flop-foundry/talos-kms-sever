@@ -25,7 +25,7 @@ WORK_DIR="$INSTALL_DIR"
 
 
 # Clean and create working directory
-rm -rf "$DEB_BUILD_DIR"
+
 mkdir -p "$DEB_BUILD_DIR"
 mkdir -p "$DEB_BUILD_DIR/input"
 mkdir -p "$DEB_BUILD_DIR/resources"
