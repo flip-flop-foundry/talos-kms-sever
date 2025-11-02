@@ -86,10 +86,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: get_maven_metadata
     outputs:
-      jar_name: ${{ steps.build_jar.outputs.jar_name || 'WRONG' }}
-      jar_path: ${{ steps.build_jar.outputs.jar_path || 'WRONG' }}
-      testing_output: ${{ steps.build_jar.outputs.testing_output || 'WRONG' }}
-      testing_output2: ${{ steps.build_jar.outputs.testing_output2 || 'WRONG' }}
+      jar_name: ${{ steps.build_jar.outputs.jar_name || 'WRONGFROMHERE' }}
+      jar_path: ${{ steps.build_jar.outputs.jar_path || 'WRONGFROMHERE' }}
+      testing_output: ${{ steps.build_jar.outputs.testing_output || 'WRONGFROMHERE' }}
+      testing_output2: ${{ steps.build_jar.outputs.testing_output2 || 'WRONGFROMHERE' }}
 
     #if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
@@ -158,6 +158,7 @@ jobs:
           password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
       - name: Build .jar file
+        id: build_jar
         run: |
           set -euo pipefail
           chmod +x buildTools/build-jar.sh
