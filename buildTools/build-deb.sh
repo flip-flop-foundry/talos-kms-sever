@@ -12,11 +12,10 @@ echo -e "${CYAN}Starting build of .deb packages...${NC}"
 
 echo -e "Building using JAR: ${GREEN}$JAR_NAME${NC} version: ${GREEN}$MAVEN_VERSION${NC}"
 
-echo "Start of environment variables:"
-env
-echo "End of environment variables."
+
 
 MAIN_CLASS="dev.flipflopfoundy.taloskms.KMSServer"
+DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
 
 DEB_BUILD_DIR="target/deb-work"
 BUILD_TOOLS_DIR="buildTools/"
@@ -153,6 +152,8 @@ echo -e "${CYAN}Building .deb packages in Docker...${NC}"
 START_TIME=$(date +%s)
 
 echo -e "${CYAN}   Building for architecture: linux/$ARCH${NC}"
+
+set -x
 
 docker run --rm \
     -v "./$DEB_BUILD_DIR:/build" \
