@@ -85,6 +85,9 @@ jobs:
     name: Build JAR file
     runs-on: ubuntu-latest
     needs: get_maven_metadata
+    outputs:
+      jar_name: ${{ steps.build_jar.outputs.jar_name || '' }}
+      jar_path: ${{ steps.build_jar.outputs.jar_path || '' }}
 
     #if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
@@ -113,7 +116,7 @@ jobs:
             echo "$line" >> $GITHUB_ENV
           done < ".cache/env_vars"
 
-      - name: Cache local Maven repository
+      - name: Load cached maven repository
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
@@ -213,8 +216,8 @@ jobs:
       - name: List files
         env:
           MATRIX_ARCH: ${{ matrix.arch }}
-          JAR_NAME: ${{ job.build_jar.outputs.jar_name || '' }}
-          JAR_PATH: ${{ job.build_jar.outputs.jar_path || '' }}
+          JAR_NAME: ${{ needs.build_jar.outputs.jar_name || '' }}
+          JAR_PATH: ${{ needs.build_jar.outputs.jar_path || '' }}
         run: |
           set -euo pipefail
           
