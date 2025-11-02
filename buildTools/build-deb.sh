@@ -152,11 +152,11 @@ echo -e "${CYAN}Building .deb packages in Docker...${NC}"
 #Track and then log how long time it takes to build all architectures
 START_TIME=$(date +%s)
 
-    echo -e "${CYAN}   Building for architecture: $arch${NC}"
+echo -e "${CYAN}   Building for architecture: linux/$ARCH${NC}"
 
 docker run --rm \
     -v "./$DEB_BUILD_DIR:/build" \
-    --platform "$ARCH" \
+    --platform "linux/$ARCH" \
     "$DOCKER_BUILD_IMAGE" \
     /bin/bash -c "cd /build && bash jpackage.sh"
 
