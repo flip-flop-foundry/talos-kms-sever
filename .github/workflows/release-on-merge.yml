@@ -86,10 +86,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: get_maven_metadata
     outputs:
-      jar_name: ${{ steps.build_jar.outputs.jar_name || 'WRONGFROMHERE' }}
-      jar_path: ${{ steps.build_jar.outputs.jar_path || 'WRONGFROMHERE' }}
-      testing_output: ${{ steps.build_jar.outputs.testing_output || 'WRONGFROMHERE' }}
-      testing_output2: ${{ steps.build_jar.outputs.testing_output2 || 'WRONGFROMHERE' }}
+      jar_name: ${{ steps.build_jar.outputs.jar_name || '' }}
+      jar_path: ${{ steps.build_jar.outputs.jar_path || '' }}
 
     #if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
 
@@ -163,11 +161,7 @@ jobs:
           set -euo pipefail
           chmod +x buildTools/build-jar.sh
           bash buildTools/build-jar.sh
-          echo "Built .jar files:"
-          ls -l target/*.jar
-          
-          echo "testing_output=SOME-OUTPUT" >> $GITHUB_OUTPUT
-          echo "testing_output2=SOME-OUTPUT2" >> "$GITHUB_OUTPUT"
+
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -222,27 +216,14 @@ jobs:
       - name: List files
         env:
           MATRIX_ARCH: ${{ matrix.arch }}
-          JAR_NAME: ${{ needs.build_jar.outputs.jar_name || 'WRONG2' }}
-          JAR_PATH: ${{ needs.build_jar.outputs.jar_path || 'WRONG2' }}
-          TESTINGOUTPUT: ${{ needs.build_jar.outputs.testing_output || 'WRONG2' }}
-          TESTINGOUTPUT2: ${{ needs.build_jar.outputs.testing_output2 || 'WRONG2' }}
+          JAR_NAME: ${{ needs.build_jar.outputs.jar_name || '' }}
+          JAR_PATH: ${{ needs.build_jar.outputs.jar_path || '' }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          chmod +x buildTools/build-deb.sh
+          bash buildTools/build-deb.sh
           
-          echo "Using architecture: ${{ matrix.arch }}"
-          echo "JAR_NAME: $JAR_NAME"
-          echo "JAR_PATH: $JAR_PATH"
-          echo "TESTINGOUTPUT: $TESTINGOUTPUT"
-          echo "TESTINGOUTPUT: $TESTINGOUTPUT"
-          
-          echo "Testing ${{ needs.build_jar.outputs.testing_output || 'WRONG3' }}"
-          echo "Testing 2 ${{ needs.build_jar.outputs.testing_output2 || 'WRONG3' }}"
-          
-          echo "Files in working directory:"
-          ls -l
-
-          echo "Files in downloaded artifact directory:"
-          ls -l target/jar-build/output/
 
           
 
