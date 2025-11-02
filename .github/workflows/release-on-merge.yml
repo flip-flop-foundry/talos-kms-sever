@@ -163,7 +163,7 @@ jobs:
           bash buildTools/build-jar.sh
 
 
-      - name: Upload artifact
+      - name: Upload jar artifact
         uses: actions/upload-artifact@v4
         with:
           name: built-jar
@@ -228,8 +228,15 @@ jobs:
           set -euo pipefail
           chmod +x buildTools/build-deb.sh
           bash buildTools/build-deb.sh
-          
 
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-deb-${{ matrix.arch }}
+          path: target/jar-build/artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
           
 
   ignore_for_now:

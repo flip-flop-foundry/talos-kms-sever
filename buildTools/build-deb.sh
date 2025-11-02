@@ -165,24 +165,27 @@ END_TIME=$(date +%s)
 ELAPSED_TIME=$((END_TIME - START_TIME))
 echo -e "${GREEN}Build completed in $ELAPSED_TIME seconds.${NC}"
 
-echo -e "${GREEN}All done! .deb packages are in $DEB_BUILD_DIR/output"
+echo -e "${GREEN}All done! .deb packages are in $DEB_BUILD_DIR/output${NC}"
 ls -lh "$DEB_BUILD_DIR/output"
 echo -e "${NC}"
 
+mkdir "$DEB_BUILD_DIR/artifacts"
+
 i=1
-for file in "$DEB_BUILD_DIR"/output/"$APP_NAME-$MAVEN_VERSION"*; do
+for file in "$DEB_BUILD_DIR"/output/"$APP_NAME"_"$MAVEN_VERSION"-*.deb; do
 
   # if no files match the glob, "$dir/$pattern" will be literal; handle that below
   if [ ! -e "$file" ]; then
     echo "No .deb files with expected prefix ($APP_NAME-$MAVEN_VERSION) found in $DEB_BUILD_DIR/output"
     exit 1
   fi
-  echo  "deb_file_$i=$(realpath "$file")"
-  echo  "deb_file_$i=$file"
-  echo "deb_file_$i=$(realpath "$file")" >> "$GITHUB_OUTPUT"
-  #echo "deb_file_$i=$(realpath "$file")" >> "$GITHUB_OUTPUT"
 
+  mv "$file" "$DEB_BUILD_DIR/artifacts/"
   i=$((i+1))
 done
+
+echo -e "${GREEN}Moved deb files to $DEB_BUILD_DIR/artifacts/"
+ls -l "$DEB_BUILD_DIR/artifacts/"
+echo -e "${NC}"
 
 exit 0
