@@ -223,7 +223,6 @@ jobs:
       - name: Build deb file for ${{ matrix.arch }}
         env:
           JAR_NAME: ${{ needs.build_jar.outputs.jar_name || '' }}
-          JAR_PATH: ${{ needs.build_jar.outputs.jar_path || '' }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
