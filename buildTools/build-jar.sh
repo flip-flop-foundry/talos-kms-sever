@@ -24,6 +24,7 @@ ls -l
 
 docker run --rm \
         -v "$PWD":/workspace -w /workspace \
+        -v "$HOME/.m2":/root/.m2 \
         "$DOCKER_BUILD_IMAGE" \
         /bin/bash -c "mvn clean package"
 
@@ -34,11 +35,8 @@ if [ ! -f "target/$JAR_NAME" ]; then
     echo "Error: JAR file not found at target/$JAR_NAME" >&2
     exit 1
 fi
-echo "Copying JAR from target/$JAR_NAME to $JAR_BUILD_DIR/"
 
 mkdir -p "$JAR_BUILD_DIR"
-ls -l target
-
 cp target/"$JAR_NAME" "$JAR_BUILD_DIR/"
 
 echo "jar_name=$JAR_NAME" >> "$GITHUB_OUTPUT"

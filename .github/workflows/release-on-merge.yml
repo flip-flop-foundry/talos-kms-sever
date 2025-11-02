@@ -113,6 +113,14 @@ jobs:
             echo "$line" >> $GITHUB_ENV
           done < ".cache/env_vars"
 
+      - name: Cache local Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
       - name: Set release version (commit to main) before building
         id: set_release
         if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
@@ -161,14 +169,68 @@ jobs:
           retention-days: 7
           overwrite: true
 
-  ignore:
-    name: Ignore for now
+  build_debs:
+    name: Build DEB for architectures
     runs-on: ubuntu-latest
-    if: false
+    needs: build_jar
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     steps:
+      - name: Checkout base branch (main)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}
+          persist-credentials: true
+
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          fail-on-cache-miss: true
+
+      - name: Load cached env file into GITHUB_ENV
+        run: |
+          while IFS= read -r line; do
+            # handle CRLF if needed:
+            line=${line%$'\r'}
+            echo "$line" >> $GITHUB_ENV
+          done < ".cache/env_vars"
+
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
 
+      - name: Download built jar artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: built-jar
+
+      - name: List files
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+          JAR_NAME: ${{ job.build_jar.outputs.jar_name || '' }}
+          JAR_PATH: ${{ job.build_jar.outputs.jar_path || '' }}
+        run: |
+          set -euo pipefail
+          echo "Files in working directory:"
+          ls -lR .
+
+          echo "Files in downloaded artifact directory:"
+          ls -lR target/jar-build/output/
+
+          echo "Using architecture: ${{ matrix.arch }}"
+          echo "JAR_NAME: $JAR_NAME"
+          echo "JAR_PATH: $JAR_PATH"
+
+  ignore_for_now:
+    name: ignore for now
+    runs-on: ubuntu-latest
+    if: false
+    steps:
       - name: Check for existing GitHub Release for this tag
         id: check_release
         run: |
