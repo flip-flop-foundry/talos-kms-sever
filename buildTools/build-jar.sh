@@ -15,7 +15,6 @@ echo -e "${CYAN}Building $APP_NAME version: $MAVEN_VERSION${NC}"
 
 # Directory structure
 JAR_BUILD_DIR="target/jar-build/output"
-mkdir -p "$JAR_BUILD_DIR"
 
 # Build the fat JAR
 echo -e "${CYAN}Building fat JAR...${NC}"
@@ -35,6 +34,10 @@ if [ ! -f "target/$JAR_NAME" ]; then
     echo "Error: JAR file not found at target/$JAR_NAME" >&2
     exit 1
 fi
+echo "Copying JAR from target/$JAR_NAME to $JAR_BUILD_DIR/"
+
+mkdir -p "$JAR_BUILD_DIR"
+ls -l target
 
 cp target/"$JAR_NAME" "$JAR_BUILD_DIR/"
 
