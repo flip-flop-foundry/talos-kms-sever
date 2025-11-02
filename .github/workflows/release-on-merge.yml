@@ -208,6 +208,7 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: built-jar
+          path: target/jar-build/output/
 
       - name: List files
         env:
@@ -216,15 +217,18 @@ jobs:
           JAR_PATH: ${{ job.build_jar.outputs.jar_path || '' }}
         run: |
           set -euo pipefail
-          echo "Files in working directory:"
-          ls -lR .
-
-          echo "Files in downloaded artifact directory:"
-          ls -lR target/jar-build/output/
-
+          
           echo "Using architecture: ${{ matrix.arch }}"
           echo "JAR_NAME: $JAR_NAME"
           echo "JAR_PATH: $JAR_PATH"
+          
+          echo "Files in working directory:"
+          ls -l
+
+          echo "Files in downloaded artifact directory:"
+          ls -l target/jar-build/output/
+
+          
 
   ignore_for_now:
     name: ignore for now
