@@ -202,18 +202,34 @@ jobs:
             fi
           fi
 
-          if [[ "$CURRENT_VERSION" != *-SNAPSHOT ]]; then
-            echo "Current version ($CURRENT_VERSION) is not a -SNAPSHOT version. Aborting to avoid ambiguous state." >&2
-            exit 1
+          ORIGINAL_VERSION="$CURRENT_VERSION"
+          CURRENT_IS_SNAPSHOT=false
+          CURRENT_IS_PRERELEASE=false
+          CURRENT_PRE_ID=""
+          CURRENT_PRE_SEQ=""
+
+          BASE_RELEASE_VERSION=""
+          if [[ "$CURRENT_VERSION" == *-SNAPSHOT ]]; then
+            CURRENT_IS_SNAPSHOT=true
+            BASE_RELEASE_VERSION="${CURRENT_VERSION%-SNAPSHOT}"
+          else
+            # Accept pre-release versions like X.Y(.Z)?-(alpha|beta|rc).N
+            PRE_PART=$(echo "$CURRENT_VERSION" | sed -nE 's/^[0-9]+\.[0-9]+(\.[0-9]+)?-([A-Za-z]+)\.([0-9]+)$/\2.\3/p') || true
+            if [ -n "$PRE_PART" ]; then
+              CURRENT_IS_PRERELEASE=true
+              CURRENT_PRE_ID="$(echo "$PRE_PART" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
+              CURRENT_PRE_SEQ="$(echo "$PRE_PART" | cut -d. -f2)"
+              BASE_RELEASE_VERSION=$(echo "$CURRENT_VERSION" | sed -E 's/^([0-9]+\.[0-9]+(\.[0-9]+)?)-[A-Za-z]+\.[0-9]+$/\1/')
+            else
+              echo "Current version ($CURRENT_VERSION) is neither -SNAPSHOT nor a recognized pre-release (alpha|beta|rc.N). Aborting." >&2
+              exit 1
+            fi
           fi
 
-          ORIGINAL_SNAPSHOT_VERSION="$CURRENT_VERSION"
-          BASE_RELEASE_VERSION="${CURRENT_VERSION%-SNAPSHOT}"
-
-          # Normalize to three segments
+          # Normalize base to three segments
           IFS='.' read -r MAJ MIN PAT <<< "$BASE_RELEASE_VERSION"
           if [ -z "$MIN" ]; then
-            echo "Release version '$BASE_RELEASE_VERSION' does not have a minor segment" >&2; exit 1
+            echo "Release base '$BASE_RELEASE_VERSION' does not have a minor segment" >&2; exit 1
           fi
           if [ -z "$PAT" ]; then
             PAT=0
@@ -229,18 +245,19 @@ jobs:
 
           if [ -n "$PRE_ID" ]; then
             PRE_RELEASE=true
-            # Determine next pre-release sequence number from tags (read-only)
-            EXISTING=$(git tag -l "v${NORMALIZED_BASE}-${PRE_ID}.*" | sed -E "s/v${NORMALIZED_BASE}-${PRE_ID}\.([0-9]+)/\1/" | sort -n | tail -1 || true)
-            if [ -z "$EXISTING" ]; then NEXT_SEQ=1; else NEXT_SEQ=$((EXISTING+1)); fi
+            # Determine next pre-release sequence number
+            if [ "$CURRENT_IS_PRERELEASE" = true ] && [ "$CURRENT_PRE_ID" = "$PRE_ID" ] && [[ "$CURRENT_PRE_SEQ" =~ ^[0-9]+$ ]]; then
+              NEXT_SEQ=$((CURRENT_PRE_SEQ+1))
+            else
+              EXISTING=$(git tag -l "v${NORMALIZED_BASE}-${PRE_ID}.*" | sed -E "s/v${NORMALIZED_BASE}-${PRE_ID}\.([0-9]+)/\1/" | sort -n | tail -1 || true)
+              if [ -z "$EXISTING" ]; then NEXT_SEQ=1; else NEXT_SEQ=$((EXISTING+1)); fi
+            fi
             RELEASE_VERSION="${NORMALIZED_BASE}-${PRE_ID}.${NEXT_SEQ}"
             TAG_NAME="v${RELEASE_VERSION}"
             PRERELEASE_BRANCH="prerelease/${NORMALIZED_BASE}-${PRE_ID}"
 
             if [ "$DRY_RUN" = true ]; then
-              echo "[DRY-RUN] Would set version to $RELEASE_VERSION and push to tag $TAG_NAME and branch $PRERELEASE_BRANCH"
-              echo "[DRY-RUN] Would act as git user: $(git config user.name) <$(git config user.email)>"
-          
-              # No push: set local version only so builds match
+              echo "[DRY-RUN] Would set version to $RELEASE_VERSION and tag $TAG_NAME"
               mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
               CHECKOUT_REF="${INPUT_REF:-main}"
             else
@@ -259,7 +276,7 @@ jobs:
               CHECKOUT_REF="$TAG_NAME"
             fi
           else
-            # Final release on main
+            # Final release path from either SNAPSHOT or pre-release
             RELEASE_VERSION="$NORMALIZED_BASE"
             TAG_NAME="v$RELEASE_VERSION"
             case "$BUMP_TYPE" in
@@ -271,12 +288,21 @@ jobs:
             NEXT_DEV_VERSION="${MAJ}.${MIN}.${PAT}-SNAPSHOT"
 
             if [ "$DRY_RUN" = true ]; then
-              echo "[DRY-RUN] Would remove -SNAPSHOT, commit release $TAG_NAME, tag and push"
-              mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+              if [ "$CURRENT_IS_SNAPSHOT" = true ]; then
+                echo "[DRY-RUN] Would remove -SNAPSHOT and tag $TAG_NAME"
+                mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+              else
+                echo "[DRY-RUN] Would set version to $RELEASE_VERSION (from pre-release $CURRENT_VERSION) and tag $TAG_NAME"
+                mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
+              fi
               CHECKOUT_REF="${INPUT_REF:-main}"
             else
               echo "Committing final release $TAG_NAME on main"
-              mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+              if [ "$CURRENT_IS_SNAPSHOT" = true ]; then
+                mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+              else
+                mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
+              fi
               git add pom.xml pom.xml || true
               git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
               echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
@@ -299,7 +325,7 @@ jobs:
           fi
           echo "arc_matrix=$ARC_MATRIX_JSON" >> $GITHUB_OUTPUT
 
-          echo "original_snapshot_version=$ORIGINAL_SNAPSHOT_VERSION" >> $GITHUB_OUTPUT
+          echo "original_snapshot_version=$ORIGINAL_VERSION" >> $GITHUB_OUTPUT
           echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "checkout_ref=$CHECKOUT_REF" >> $GITHUB_OUTPUT
