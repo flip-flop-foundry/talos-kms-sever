@@ -93,7 +93,7 @@ jobs:
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
-          git remote set-url origin https://${BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
+          git remote set-url origin https://${BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-server.git
 
       - name: Confirm actor and identity for debugging
         env:
@@ -563,7 +563,7 @@ jobs:
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
-          git remote set-url origin https://${BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
+          git remote set-url origin https://${BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-server.git
 
       - name: Validate current pom matches release version
         run: |
@@ -590,3 +590,33 @@ jobs:
           git push origin HEAD:main
           echo "Bumped to $NEXT"
 
+  cleanup_prerelease_branches:
+    name: Delete leftover prerelease branches
+    runs-on: ubuntu-latest
+    needs: [release_prepare, post_release_bump]
+    if: >-
+      needs.release_prepare.outputs.pre_release == 'false' &&
+      needs.release_prepare.outputs.dry_run != 'true' &&
+      needs.post_release_bump.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}
+          persist-credentials: true
+      - name: Delete prerelease branches for this base version
+        env:
+          BASE_VERSION: ${{ needs.release_prepare.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          echo "Cleaning prerelease branches for base version: $BASE_VERSION"
+          for PID in rc beta alpha; do
+            BR="prerelease/${BASE_VERSION}-${PID}"
+            if git ls-remote --exit-code origin "refs/heads/${BR}" >/dev/null 2>&1; then
+              echo "Deleting remote branch ${BR}" && git push origin --delete "${BR}" || echo "Failed to delete ${BR}" >&2
+            else
+              echo "Branch ${BR} not found, skipping"
+            fi
+          done
+          echo "Prerelease branch cleanup complete."
