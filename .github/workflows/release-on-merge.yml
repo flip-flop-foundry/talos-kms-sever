@@ -83,15 +83,25 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.ref != '' && inputs.ref || github.event.pull_request.head.ref || github.head_ref || github.ref_name || 'main') || (github.event.pull_request.base.ref || github.ref) }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Set up git user
         env:
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
+          BOT_MAIL: ${{ vars.BOT_MAIL }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
+          git remote set-url origin https://${$BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
+
+      - name: Confirm actor and identity for debugging
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          echo "GITHUB_ACTOR=$GITHUB_ACTOR"
+          curl -s -H "Authorization: token $BOT_TOKEN" https://api.github.com/user | jq -r '.login, .id' || true
+
 
       - name: Restore cached env file
         id: cache-restore
@@ -353,7 +363,7 @@ jobs:
           ref: ${{ needs.release_prepare.outputs.checkout_ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Restore cached env file
         id: cache-restore
@@ -429,7 +439,7 @@ jobs:
           ref: ${{ needs.release_prepare.outputs.checkout_ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Restore cached env file
         id: cache-restore
@@ -544,15 +554,17 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Configure git user
+      - name: Set up git user
         env:
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
+            BOT_USERNAME: ${{ vars.BOT_USERNAME }}
+            BOT_MAIL: ${{ vars.BOT_MAIL }}
+            BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
+          git remote set-url origin https://${$BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
 
       - name: Validate current pom matches release version
         run: |
