@@ -52,12 +52,14 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
+          BOT_MAIL: ${{ vars.BOT_MAIL  }}
           persist-credentials: true
 
       - name: Set up git user
         run: |
-          git config user.name "release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
 
       - name: Gather Maven metadata (pre-bump)
         id: meta
@@ -384,12 +386,14 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
+          BOT_MAIL: ${{ vars.BOT_MAIL  }}
           persist-credentials: true
 
       - name: Configure git user
         run: |
-          git config user.name "release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
 
       - name: Validate current pom matches release version
         run: |
