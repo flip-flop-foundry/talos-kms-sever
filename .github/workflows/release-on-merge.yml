@@ -265,7 +265,7 @@ jobs:
               git checkout -B "$PRERELEASE_BRANCH"
               mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
               git add pom.xml || true
-              git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
+              git commit -m "Bot: create pre-release commit: $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
               echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
               echo "Tagging pre-release $TAG_NAME"
               git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
@@ -304,7 +304,7 @@ jobs:
                 mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
               fi
               git add pom.xml pom.xml || true
-              git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
+              git commit -m "Bot: create release commit: $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
               echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
               echo "Tagging release $TAG_NAME"
               git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
@@ -611,7 +611,7 @@ jobs:
             exit 1
           fi
           echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
-          git commit -m "chore(release): start $NEXT"
+          git commit -m "Bot: bump pom version to next snapshot version: $NEXT"
           echo "Pushing next development version $NEXT to HEAD:main"
           git push origin HEAD:main
           echo "Bumped to $NEXT"
