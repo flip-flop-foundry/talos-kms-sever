@@ -36,7 +36,7 @@ on:
         description: "Final release bump type (major/minor/patch)"
         type: choice
         options: ["minor", "major", "patch"]
-        default: "minor"
+        default: "patch"
         required: false
 
 permissions:
@@ -121,7 +121,7 @@ jobs:
           echo "save-success=true" >> $GITHUB_OUTPUT
           echo "Maven metadata retrieval complete."
 
-      - name: Save cache (actions/cache uploads at end for misses)
+      - name: Save env cache (actions/cache uploads at end for misses)
         if: steps.get_maven_metadata.outputs.save-success == 'true'
         uses: actions/cache/save@v4
         with:
@@ -231,7 +231,7 @@ jobs:
               echo "Creating/updating prerelease branch $PRERELEASE_BRANCH"
               git checkout -B "$PRERELEASE_BRANCH"
               mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
-              git add pom.xml pom.xml || true
+              git add pom.xml || true
               git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
               echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
               echo "Tagging pre-release $TAG_NAME"
@@ -290,6 +290,37 @@ jobs:
           echo "dry_run=$DRY_RUN" >> $GITHUB_OUTPUT
 
           echo "Version step complete."
+
+
+      - name: Gather Maven metadata, after pom was bumped
+        id: get_maven_metadata_after_bump
+        run: |
+          set -euo pipefail
+          PARAMS=(
+            "project.version:MAVEN_VERSION"
+            "project.artifactId:APP_NAME"
+            "project.description:DESCRIPTION"
+            "project.organization.name:VENDOR"
+            "project.developers[0].email:MAINTAINER_EMAIL"
+          )
+          for entry in "${PARAMS[@]}"; do
+            IFS=':' read -r EXPR OUT <<< "$entry"
+            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
+            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
+            echo "$OUT=$VALUE" >> $GITHUB_ENV
+            echo "$OUT=$VALUE"
+          
+            mkdir -p .cache
+            echo "${OUT}=${VALUE}" >> .cache/env_vars
+          done
+          echo "save-success=true" >> $GITHUB_OUTPUT
+          echo "Maven metadata retrieval complete."
+
+      - name: Save env cache (actions/cache uploads at end for misses)
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
 
   build_jar:
     name: Build JAR file (from tag or ref)
