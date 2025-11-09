@@ -128,6 +128,15 @@ jobs:
           path: .cache/env_vars
           key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
 
+      - name: Load cached env file into GITHUB_ENV
+        if: steps.cache-restore.outputs.cache-hit == 'true'
+        run: |
+          while IFS= read -r line; do
+          # handle CRLF if needed:
+          line=${line%$'\r'}
+          echo "$line" >> $GITHUB_ENV
+          done < ".cache/env_vars"
+
       - name: Compute versions, branch and tag (or simulate in dry-run)
         id: compute
         env:
@@ -224,6 +233,7 @@ jobs:
               mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
               git add pom.xml pom.xml || true
               git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
+              echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
               echo "Tagging pre-release $TAG_NAME"
               git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
               echo "Pushing branch: $PRERELEASE_BRANCH"
@@ -253,6 +263,7 @@ jobs:
               mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
               git add pom.xml pom.xml || true
               git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
+              echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
               echo "Tagging release $TAG_NAME"
               git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
               echo "Pushing to HEAD:main"
@@ -514,7 +525,9 @@ jobs:
             echo "No version change detected when setting next dev version $NEXT" >&2
             exit 1
           fi
+          echo "Acting as git user: $(git config user.name) <$(git config user.email)>"
           git commit -m "chore(release): start $NEXT"
+          echo "Pushing next development version $NEXT to HEAD:main"
           git push origin HEAD:main
           echo "Bumped to $NEXT"
 
