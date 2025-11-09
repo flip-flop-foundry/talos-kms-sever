@@ -15,6 +15,29 @@ on:
     branches:
       - addingMatrixToWorkflow
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (no pushes/tags/releases)"
+        type: boolean
+        default: true
+        required: false
+      ref:
+        description: "Git ref to test from (defaults to PR source branch or selected branch)"
+        type: string
+        default: ""
+        required: false
+      pre_id:
+        description: "Pre-release id to simulate (none/rc/beta/alpha)"
+        type: choice
+        options: ["none", "rc", "beta", "alpha"]
+        default: "none"
+        required: false
+      bump_type:
+        description: "Final release bump type (major/minor/patch)"
+        type: choice
+        options: ["minor", "major", "patch"]
+        default: "minor"
+        required: false
 
 permissions:
   contents: write
@@ -31,6 +54,7 @@ jobs:
     outputs:
       release_version: ${{ steps.compute.outputs.release_version }}
       tag_name: ${{ steps.compute.outputs.tag_name }}
+      checkout_ref: ${{ steps.compute.outputs.checkout_ref }}
       next_dev_version: ${{ steps.compute.outputs.next_dev_version }}
       bump_type: ${{ steps.compute.outputs.bump_type }}
       app_name: ${{ steps.compute.outputs.app_name }}
@@ -41,15 +65,16 @@ jobs:
       pre_id: ${{ steps.compute.outputs.pre_id }}
       original_snapshot_version: ${{ steps.compute.outputs.original_snapshot_version }}
       prerelease_branch: ${{ steps.compute.outputs.prerelease_branch }}
+      dry_run: ${{ steps.compute.outputs.dry_run }}
     if: >-
       (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
       || github.event_name == 'workflow_dispatch'
 
     steps:
-      - name: Checkout base branch (main)
+      - name: Checkout base branch (main or input ref)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.ref != '' && inputs.ref || github.event.pull_request.head.ref || github.head_ref || github.ref_name || 'main') || (github.event.pull_request.base.ref || github.ref) }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
@@ -81,8 +106,13 @@ jobs:
             echo "$OUT=$VALUE"
           done
 
-      - name: Compute versions, branch and tag
+      - name: Compute versions, branch and tag (or simulate in dry-run)
         id: compute
+        env:
+          INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          INPUT_PRE_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.pre_id || '' }}
+          INPUT_BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_type || '' }}
+          INPUT_REF: ${{ github.event_name == 'workflow_dispatch' && (inputs.ref != '' && inputs.ref || github.event.pull_request.head.ref || github.head_ref || github.ref_name || 'main') || '' }}
         run: |
           set -euo pipefail
           CURRENT_VERSION="$MAVEN_VERSION"
@@ -91,10 +121,24 @@ jobs:
             exit 1
           fi
 
+          DRY_RUN=false
+          if [ "$INPUT_DRY_RUN" = "true" ]; then DRY_RUN=true; fi
+
           # Default bump type (for final release only)
           BUMP_TYPE=minor
           PRE_ID=""
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Override from inputs
+            case "$INPUT_BUMP" in
+              major|minor|patch) BUMP_TYPE="$INPUT_BUMP" ;;
+            esac
+            case "$INPUT_PRE_ID" in
+              rc|beta|alpha) PRE_ID="$INPUT_PRE_ID" ;;
+              none|"") PRE_ID="" ;;
+            esac
+          else
+            # pull_request_target path: parse labels
             if command -v jq >/dev/null 2>&1; then
               LABELS=$(jq -r '.pull_request.labels[].name' < "$GITHUB_EVENT_PATH" || true)
               echo "PR Labels: $LABELS"
@@ -134,24 +178,35 @@ jobs:
           TAG_NAME=""
           NEXT_DEV_VERSION=""
           PRERELEASE_BRANCH=""
+          CHECKOUT_REF=""
 
           if [ -n "$PRE_ID" ]; then
             PRE_RELEASE=true
-            # Determine next pre-release sequence number from tags
+            # Determine next pre-release sequence number from tags (read-only)
             EXISTING=$(git tag -l "v${NORMALIZED_BASE}-${PRE_ID}.*" | sed -E "s/v${NORMALIZED_BASE}-${PRE_ID}\.([0-9]+)/\1/" | sort -n | tail -1 || true)
             if [ -z "$EXISTING" ]; then NEXT_SEQ=1; else NEXT_SEQ=$((EXISTING+1)); fi
             RELEASE_VERSION="${NORMALIZED_BASE}-${PRE_ID}.${NEXT_SEQ}"
             TAG_NAME="v${RELEASE_VERSION}"
             PRERELEASE_BRANCH="prerelease/${NORMALIZED_BASE}-${PRE_ID}"
 
-            echo "Creating/updating prerelease branch $PRERELEASE_BRANCH"
-            git checkout -B "$PRERELEASE_BRANCH"
-            mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
-            git add pom.xml pom.xml || true
-            git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
-            git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
-            git push origin "$PRERELEASE_BRANCH"
-            git push origin "$TAG_NAME"
+            if [ "$DRY_RUN" = true ]; then
+              echo "[DRY-RUN] Would set version to $RELEASE_VERSION and push to tag $TAG_NAME and branch $PRERELEASE_BRANCH"
+              echo "[DRY-RUN] Would act as git user: $(git config user.name) <$(git config user.email)>"
+          
+              # No push: set local version only so builds match
+              mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
+              CHECKOUT_REF="${INPUT_REF:-main}"
+            else
+              echo "Creating/updating prerelease branch $PRERELEASE_BRANCH"
+              git checkout -B "$PRERELEASE_BRANCH"
+              mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
+              git add pom.xml pom.xml || true
+              git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
+              git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
+              git push origin "$PRERELEASE_BRANCH"
+              git push origin "$TAG_NAME"
+              CHECKOUT_REF="$TAG_NAME"
+            fi
           else
             # Final release on main
             RELEASE_VERSION="$NORMALIZED_BASE"
@@ -164,18 +219,26 @@ jobs:
             esac
             NEXT_DEV_VERSION="${MAJ}.${MIN}.${PAT}-SNAPSHOT"
 
-            echo "Committing final release $TAG_NAME on main"
-            mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
-            git add pom.xml pom.xml || true
-            git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
-            git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
-            git push origin HEAD:main
-            git push origin "$TAG_NAME"
+            if [ "$DRY_RUN" = true ]; then
+              echo "[DRY-RUN] Would remove -SNAPSHOT, commit release $TAG_NAME, tag and push"
+              mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+              CHECKOUT_REF="${INPUT_REF:-main}"
+            else
+              echo "Committing final release $TAG_NAME on main"
+              mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+              git add pom.xml pom.xml || true
+              git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
+              git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+              git push origin HEAD:main
+              git push origin "$TAG_NAME"
+              CHECKOUT_REF="$TAG_NAME"
+            fi
           fi
 
           echo "original_snapshot_version=$ORIGINAL_SNAPSHOT_VERSION" >> $GITHUB_OUTPUT
           echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "checkout_ref=$CHECKOUT_REF" >> $GITHUB_OUTPUT
           echo "next_dev_version=$NEXT_DEV_VERSION" >> $GITHUB_OUTPUT
           echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
           echo "pre_release=$PRE_RELEASE" >> $GITHUB_OUTPUT
@@ -185,27 +248,28 @@ jobs:
           echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
           echo "vendor=$VENDOR" >> $GITHUB_OUTPUT
           echo "maintainer_email=$MAINTAINER_EMAIL" >> $GITHUB_OUTPUT
+          echo "dry_run=$DRY_RUN" >> $GITHUB_OUTPUT
 
-          echo "Version commit and tag created."
+          echo "Version step complete."
 
   build_jar:
-    name: Build JAR file (from tag)
+    name: Build JAR file (from tag or ref)
     runs-on: ubuntu-latest
     needs: release_prepare
     outputs:
       jar_name: ${{ steps.build_jar.outputs.jar_name || '' }}
       jar_path: ${{ steps.build_jar.outputs.jar_path || '' }}
-    if: needs.release_prepare.outputs.tag_name != ''
+    if: needs.release_prepare.outputs.checkout_ref != ''
     steps:
-      - name: Checkout release tag
+      - name: Checkout ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release_prepare.outputs.tag_name }}
+          ref: ${{ needs.release_prepare.outputs.checkout_ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-      - name: Retrieve Maven metadata from tag
+      - name: Retrieve Maven metadata from ref
         run: |
           set -euo pipefail
           PARAMS=(
@@ -222,6 +286,12 @@ jobs:
             echo "$OUT=$VALUE" >> $GITHUB_ENV
             echo "$OUT=$VALUE"
           done
+
+      - name: Set pom version locally for dry-run
+        if: needs.release_prepare.outputs.dry_run == 'true'
+        run: |
+          set -euo pipefail
+          mvn -B -ntp versions:set -DnewVersion="${{ needs.release_prepare.outputs.release_version }}" -DgenerateBackupPoms=false -DprocessAllModules
 
       - name: Load cached maven repository
         uses: actions/cache@v4
@@ -258,7 +328,7 @@ jobs:
           overwrite: true
 
   build_debs:
-    name: Build DEB for architectures (from tag)
+    name: Build DEB for architectures (from tag or ref)
     runs-on: ubuntu-latest
     needs: build_jar
     strategy:
@@ -266,15 +336,15 @@ jobs:
         arch: [amd64, arm64]
     if: needs.build_jar.outputs.jar_name != ''
     steps:
-      - name: Checkout release tag
+      - name: Checkout ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release_prepare.outputs.tag_name }}
+          ref: ${{ needs.release_prepare.outputs.checkout_ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-      - name: Retrieve Maven metadata from tag
+      - name: Retrieve Maven metadata from ref
         run: |
           set -euo pipefail
           PARAMS=(
@@ -330,7 +400,7 @@ jobs:
     name: Create GitHub Release & Upload Assets
     runs-on: ubuntu-latest
     needs: [release_prepare, build_debs]
-    if: needs.release_prepare.outputs.tag_name != '' && needs.build_debs.result == 'success'
+    if: needs.release_prepare.outputs.tag_name != '' && needs.build_debs.result == 'success' && needs.release_prepare.outputs.dry_run != 'true'
     steps:
       - name: Download jar artifact
         uses: actions/download-artifact@v5
@@ -378,6 +448,7 @@ jobs:
       always() &&
       needs.release_prepare.outputs.next_dev_version != '' &&
       needs.release_prepare.outputs.pre_release == 'false' &&
+      needs.release_prepare.outputs.dry_run != 'true' &&
       needs.build_debs.result == 'success' &&
       needs.create_github_release.result == 'success'
     steps:
