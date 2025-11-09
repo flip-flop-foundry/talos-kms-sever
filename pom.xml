@@ -6,7 +6,7 @@
 
     <groupId>dev.flipflopfoundy</groupId>
     <artifactId>talos-kms-server</artifactId>
-    <version>0.7-SNAPSHOT</version>
+    <version>0.7.0-alpha.2</version>
     <description>
         A KMS server implementation for Talos. Intended for disk decryption key management.
     </description>
