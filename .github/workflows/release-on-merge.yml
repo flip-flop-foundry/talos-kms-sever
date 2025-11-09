@@ -30,7 +30,7 @@ on:
         description: "Pre-release id to simulate (none/rc/beta/alpha)"
         type: choice
         options: ["none", "rc", "beta", "alpha"]
-        default: "none"
+        default: "alpha"
         required: false
       bump_type:
         description: "Final release bump type (major/minor/patch)"
@@ -98,7 +98,7 @@ jobs:
 
       - name: Gather Maven metadata (pre-bump)
         if: steps.cache-restore.outputs.cache-hit != 'true'
-        id: meta
+        id: get_maven_metadata
         run: |
           set -euo pipefail
           PARAMS=(
@@ -224,8 +224,11 @@ jobs:
               mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
               git add pom.xml pom.xml || true
               git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
+              echo "Tagging pre-release $TAG_NAME"
               git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
+              echo "Pushing branch: $PRERELEASE_BRANCH"
               git push origin "$PRERELEASE_BRANCH"
+              echo "Pushing tag: $TAG_NAME"
               git push origin "$TAG_NAME"
               CHECKOUT_REF="$TAG_NAME"
             fi
@@ -250,8 +253,11 @@ jobs:
               mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
               git add pom.xml pom.xml || true
               git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
+              echo "Tagging release $TAG_NAME"
               git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+              echo "Pushing to HEAD:main"
               git push origin HEAD:main
+              echo "Pushing tag: $TAG_NAME"
               git push origin "$TAG_NAME"
               CHECKOUT_REF="$TAG_NAME"
             fi
