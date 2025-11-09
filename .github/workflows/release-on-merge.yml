@@ -87,7 +87,17 @@ jobs:
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
 
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-env-
+
       - name: Gather Maven metadata (pre-bump)
+        if: steps.cache-restore.outputs.cache-hit != 'true'
         id: meta
         run: |
           set -euo pipefail
@@ -104,7 +114,19 @@ jobs:
             VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
             echo "$OUT=$VALUE" >> $GITHUB_ENV
             echo "$OUT=$VALUE"
+          
+            mkdir -p .cache
+            echo "${OUT}=${VALUE}" >> .cache/env_vars
           done
+          echo "save-success=true" >> $GITHUB_OUTPUT
+          echo "Maven metadata retrieval complete."
+
+      - name: Save cache (actions/cache uploads at end for misses)
+        if: steps.get_maven_metadata.outputs.save-success == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
 
       - name: Compute versions, branch and tag (or simulate in dry-run)
         id: compute
@@ -269,29 +291,21 @@ jobs:
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-      - name: Retrieve Maven metadata from ref
-        run: |
-          set -euo pipefail
-          PARAMS=(
-            "project.version:MAVEN_VERSION"
-            "project.artifactId:APP_NAME"
-            "project.description:DESCRIPTION"
-            "project.organization.name:VENDOR"
-            "project.developers[0].email:MAINTAINER_EMAIL"
-          )
-          for entry in "${PARAMS[@]}"; do
-            IFS=':' read -r EXPR OUT <<< "$entry"
-            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
-            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
-            echo "$OUT=$VALUE" >> $GITHUB_ENV
-            echo "$OUT=$VALUE"
-          done
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          fail-on-cache-miss: true
 
-      - name: Set pom version locally for dry-run
-        if: needs.release_prepare.outputs.dry_run == 'true'
+      - name: Load cached env file into GITHUB_ENV
         run: |
-          set -euo pipefail
-          mvn -B -ntp versions:set -DnewVersion="${{ needs.release_prepare.outputs.release_version }}" -DgenerateBackupPoms=false -DprocessAllModules
+          while IFS= read -r line; do
+          # handle CRLF if needed:
+          line=${line%$'\r'}
+          echo "$line" >> $GITHUB_ENV
+          done < ".cache/env_vars"
 
       - name: Load cached maven repository
         uses: actions/cache@v4
@@ -300,6 +314,15 @@ jobs:
           key: ${{ runner.os }}-maven-${{ hashFiles('pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-maven-
+
+
+      - name: Set pom version locally for dry-run
+        if: needs.release_prepare.outputs.dry_run == 'true'
+        run: |
+          set -euo pipefail
+          mvn -B -ntp versions:set -DnewVersion="${{ needs.release_prepare.outputs.release_version }}" -DgenerateBackupPoms=false -DprocessAllModules
+
+
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -344,23 +367,21 @@ jobs:
           token: ${{ secrets.BOT_TOKEN }}
           persist-credentials: true
 
-      - name: Retrieve Maven metadata from ref
+      - name: Restore cached env file
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: .cache/env_vars
+          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
+          fail-on-cache-miss: true
+
+      - name: Load cached env file into GITHUB_ENV
         run: |
-          set -euo pipefail
-          PARAMS=(
-            "project.version:MAVEN_VERSION"
-            "project.artifactId:APP_NAME"
-            "project.description:DESCRIPTION"
-            "project.organization.name:VENDOR"
-            "project.developers[0].email:MAINTAINER_EMAIL"
-          )
-          for entry in "${PARAMS[@]}"; do
-            IFS=':' read -r EXPR OUT <<< "$entry"
-            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
-            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
-            echo "$OUT=$VALUE" >> $GITHUB_ENV
-            echo "$OUT=$VALUE"
-          done
+          while IFS= read -r line; do
+          # handle CRLF if needed:
+          line=${line%$'\r'}
+          echo "$line" >> $GITHUB_ENV
+          done < ".cache/env_vars"
 
       - name: Set up QEMU emulation (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
