@@ -12,7 +12,11 @@ echo -e "${CYAN}Starting build of .deb packages...${NC}"
 
 echo -e "Building using JAR: ${GREEN}$JAR_NAME${NC} version: ${GREEN}$MAVEN_VERSION${NC}"
 
-
+# Debian upstream versions cannot contain '-' inside upstream; use '~' for pre-releases
+DEB_APP_VERSION="$MAVEN_VERSION"
+if echo "$MAVEN_VERSION" | grep -Eq '-(rc|beta|alpha)\.'; then
+  DEB_APP_VERSION=$(echo "$MAVEN_VERSION" | sed -E 's/-(rc|beta|alpha)\./~\1./')
+fi
 
 MAIN_CLASS="dev.flipflopfoundy.taloskms.KMSServer"
 DOCKER_BUILD_IMAGE="ghcr.io/flip-flop-foundry/talos-kms-builder:latest"
@@ -121,7 +125,7 @@ set -x
 jpackage \
   --type deb \
   --name "${APP_NAME}" \
-  --app-version "$MAVEN_VERSION" \
+  --app-version "$DEB_APP_VERSION" \
   --vendor "$VENDOR" \
   --description "$DESCRIPTION" \
   --input "/build/input" \
@@ -135,11 +139,11 @@ jpackage \
   --install-dir "/opt/" \
   --icon "" \
   --app-content "/build/resources/$APP_NAME.service" \
-  --app-content "/build/resources/acmeReload.sh" \
-  --verbose
+  --app-content "/build/resources/acmeReload.sh"
 
 EOF
 #   --launcher-as-service \
+#   --verbose
 #   --add-launcher "${APP_NAME}_bengt=/opt/$APP_NAME/bin/$APP_NAME.properties" \
 
 chmod +x "$DEB_BUILD_DIR/jpackage.sh"
@@ -153,7 +157,6 @@ START_TIME=$(date +%s)
 
 echo -e "${CYAN}   Building for architecture: linux/$ARCH${NC}"
 
-set -x
 
 docker run --rm \
     -v "./$DEB_BUILD_DIR:/build" \
@@ -171,12 +174,15 @@ echo -e "${NC}"
 
 mkdir "$DEB_BUILD_DIR/artifacts"
 
+# Use the deb app version to find artifacts
+ARTIFACT_VERSION="$DEB_APP_VERSION"
+
 i=1
-for file in "$DEB_BUILD_DIR"/output/"$APP_NAME"_"$MAVEN_VERSION"-*.deb; do
+for file in "$DEB_BUILD_DIR"/output/"$APP_NAME"_"$ARTIFACT_VERSION"-*.deb; do
 
   # if no files match the glob, "$dir/$pattern" will be literal; handle that below
   if [ ! -e "$file" ]; then
-    echo "No .deb files with expected prefix ($APP_NAME-$MAVEN_VERSION) found in $DEB_BUILD_DIR/output"
+    echo "No .deb files with expected prefix ($APP_NAME_$ARTIFACT_VERSION) found in $DEB_BUILD_DIR/output"
     exit 1
   fi
 
