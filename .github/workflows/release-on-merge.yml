@@ -52,11 +52,12 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
           persist-credentials: true
 
       - name: Set up git user
+        env:
+          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
+          BOT_MAIL: ${{ vars.BOT_MAIL  }}
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
@@ -146,7 +147,7 @@ jobs:
             echo "Creating/updating prerelease branch $PRERELEASE_BRANCH"
             git checkout -B "$PRERELEASE_BRANCH"
             mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
-            git add pom.xml */*/pom.xml || true
+            git add pom.xml pom.xml || true
             git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
             git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
             git push origin "$PRERELEASE_BRANCH"
@@ -165,7 +166,7 @@ jobs:
 
             echo "Committing final release $TAG_NAME on main"
             mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
-            git add pom.xml */*/pom.xml || true
+            git add pom.xml pom.xml || true
             git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
             git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
             git push origin HEAD:main
@@ -386,11 +387,12 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
           persist-credentials: true
 
       - name: Configure git user
+        env:
+          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
+          BOT_MAIL: ${{ vars.BOT_MAIL  }}
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
@@ -409,7 +411,7 @@ jobs:
           set -euo pipefail
           NEXT="${{ needs.release_prepare.outputs.next_dev_version }}"
           mvn -B -ntp versions:set -DnewVersion="$NEXT" -DgenerateBackupPoms=false -DprocessAllModules
-          git add pom.xml */*/pom.xml || true
+          git add pom.xml pom.xml || true
           if git diff --cached --quiet; then
             echo "No version change detected when setting next dev version $NEXT" >&2
             exit 1
