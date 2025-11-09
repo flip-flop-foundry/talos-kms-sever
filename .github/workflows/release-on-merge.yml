@@ -39,7 +39,7 @@ on:
         default: "patch"
         required: false
       build_arm64:
-        description: "Build arm64 .deb (only effective for manual dispatch)"
+        description: "Build arm64 .deb (adds about 5min to build time)"
         type: boolean
         default: false
         required: false
@@ -150,7 +150,7 @@ jobs:
           INPUT_PRE_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.pre_id || '' }}
           INPUT_BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_type || '' }}
           INPUT_REF: ${{ github.event_name == 'workflow_dispatch' && (inputs.ref != '' && inputs.ref || github.event.pull_request.head.ref || github.head_ref || github.ref_name || 'main') || '' }}
-          INPUT_BUILD_ARM64: ${{ github.event_name == 'workflow_dispatch' && inputs.build_arm64 || 'true' }}
+          INPUT_BUILD_ARM64: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_arm64) || github.event_name != 'workflow_dispatch'}}
         run: |
           set -euo pipefail
           CURRENT_VERSION="$MAVEN_VERSION"
