@@ -1,7 +1,7 @@
 # Merged release workflow: on PR merge to main, build debs, create tag/release, then bump main to next minor SNAPSHOT
+# Extended to support pre-releases (rc/beta/alpha) via PR labels: release:rc, release:beta, release:alpha
 
-
-name: Release on PR merge (build + bump)
+name: Build and Release on PR Merge to main
 ## TODO remove synchronize once tested
 ## TODO remove workflow_dispatch once tested
 on:
@@ -11,19 +11,39 @@ on:
       - synchronize
     branches:
       - main
-      - switchReleaseToBuiltImage
+  push:
+    branches:
+      - addingMatrixToWorkflow
   workflow_dispatch:
-
 
 permissions:
   contents: write
 
-jobs:
-  release_on_pr_merge:
-    name: Release when PR merged to main
-    runs-on: ubuntu-latest
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
-    if: ((github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || github.event_name == 'workflow_dispatch')
+jobs:
+
+  release_prepare:
+    name: Prepare & Tag Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.compute.outputs.release_version }}
+      tag_name: ${{ steps.compute.outputs.tag_name }}
+      next_dev_version: ${{ steps.compute.outputs.next_dev_version }}
+      bump_type: ${{ steps.compute.outputs.bump_type }}
+      app_name: ${{ steps.compute.outputs.app_name }}
+      description: ${{ steps.compute.outputs.description }}
+      vendor: ${{ steps.compute.outputs.vendor }}
+      maintainer_email: ${{ steps.compute.outputs.maintainer_email }}
+      pre_release: ${{ steps.compute.outputs.pre_release }}
+      pre_id: ${{ steps.compute.outputs.pre_id }}
+      original_snapshot_version: ${{ steps.compute.outputs.original_snapshot_version }}
+      prerelease_branch: ${{ steps.compute.outputs.prerelease_branch }}
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+      || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout base branch (main)
@@ -32,20 +52,183 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref || github.ref }}
           fetch-depth: 0
           token: ${{ secrets.BOT_TOKEN }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
+          BOT_MAIL: ${{ vars.BOT_MAIL  }}
           persist-credentials: true
 
-
-      - name: Dump event JSON file
-        if: false
+      - name: Set up git user
         run: |
-          cat "$GITHUB_EVENT_PATH"
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
 
+      - name: Gather Maven metadata (pre-bump)
+        id: meta
+        run: |
+          set -euo pipefail
+          PARAMS=(
+            "project.version:MAVEN_VERSION"
+            "project.artifactId:APP_NAME"
+            "project.description:DESCRIPTION"
+            "project.organization.name:VENDOR"
+            "project.developers[0].email:MAINTAINER_EMAIL"
+          )
+          for entry in "${PARAMS[@]}"; do
+            IFS=':' read -r EXPR OUT <<< "$entry"
+            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
+            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
+            echo "$OUT=$VALUE" >> $GITHUB_ENV
+            echo "$OUT=$VALUE"
+          done
 
-      - name: Set up QEMU emulation (for multi-arch builds)
-        uses: docker/setup-qemu-action@v2
+      - name: Compute versions, branch and tag
+        id: compute
+        run: |
+          set -euo pipefail
+          CURRENT_VERSION="$MAVEN_VERSION"
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "Unable to determine current Maven version" >&2
+            exit 1
+          fi
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+          # Default bump type (for final release only)
+          BUMP_TYPE=minor
+          PRE_ID=""
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            if command -v jq >/dev/null 2>&1; then
+              LABELS=$(jq -r '.pull_request.labels[].name' < "$GITHUB_EVENT_PATH" || true)
+              echo "PR Labels: $LABELS"
+              for l in $LABELS; do
+                case "$l" in
+                  release:major) BUMP_TYPE=major ;;
+                  release:minor) BUMP_TYPE=minor ;;
+                  release:patch) BUMP_TYPE=patch ;;
+                  release:rc) PRE_ID=rc ;;
+                  release:beta) PRE_ID=beta ;;
+                  release:alpha) PRE_ID=alpha ;;
+                esac
+              done
+            fi
+          fi
+
+          if [[ "$CURRENT_VERSION" != *-SNAPSHOT ]]; then
+            echo "Current version ($CURRENT_VERSION) is not a -SNAPSHOT version. Aborting to avoid ambiguous state." >&2
+            exit 1
+          fi
+
+          ORIGINAL_SNAPSHOT_VERSION="$CURRENT_VERSION"
+          BASE_RELEASE_VERSION="${CURRENT_VERSION%-SNAPSHOT}"
+
+          # Normalize to three segments
+          IFS='.' read -r MAJ MIN PAT <<< "$BASE_RELEASE_VERSION"
+          if [ -z "$MIN" ]; then
+            echo "Release version '$BASE_RELEASE_VERSION' does not have a minor segment" >&2; exit 1
+          fi
+          if [ -z "$PAT" ]; then
+            PAT=0
+          fi
+          NORMALIZED_BASE="${MAJ}.${MIN}.${PAT}"
+
+          PRE_RELEASE=false
+          RELEASE_VERSION=""
+          TAG_NAME=""
+          NEXT_DEV_VERSION=""
+          PRERELEASE_BRANCH=""
+
+          if [ -n "$PRE_ID" ]; then
+            PRE_RELEASE=true
+            # Determine next pre-release sequence number from tags
+            EXISTING=$(git tag -l "v${NORMALIZED_BASE}-${PRE_ID}.*" | sed -E "s/v${NORMALIZED_BASE}-${PRE_ID}\.([0-9]+)/\1/" | sort -n | tail -1 || true)
+            if [ -z "$EXISTING" ]; then NEXT_SEQ=1; else NEXT_SEQ=$((EXISTING+1)); fi
+            RELEASE_VERSION="${NORMALIZED_BASE}-${PRE_ID}.${NEXT_SEQ}"
+            TAG_NAME="v${RELEASE_VERSION}"
+            PRERELEASE_BRANCH="prerelease/${NORMALIZED_BASE}-${PRE_ID}"
+
+            echo "Creating/updating prerelease branch $PRERELEASE_BRANCH"
+            git checkout -B "$PRERELEASE_BRANCH"
+            mvn -B -ntp versions:set -DnewVersion="$RELEASE_VERSION" -DgenerateBackupPoms=false -DprocessAllModules
+            git add pom.xml */*/pom.xml || true
+            git commit -m "pre-release: cut $TAG_NAME" || { echo "Nothing to commit for prerelease" >&2; exit 1; }
+            git tag -a "$TAG_NAME" -m "Pre-release $TAG_NAME"
+            git push origin "$PRERELEASE_BRANCH"
+            git push origin "$TAG_NAME"
+          else
+            # Final release on main
+            RELEASE_VERSION="$NORMALIZED_BASE"
+            TAG_NAME="v$RELEASE_VERSION"
+            case "$BUMP_TYPE" in
+              major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+              minor) MIN=$((MIN+1)); PAT=0 ;;
+              patch) PAT=$((PAT+1)) ;;
+              *) echo "Unknown bump type: $BUMP_TYPE" >&2; exit 1 ;;
+            esac
+            NEXT_DEV_VERSION="${MAJ}.${MIN}.${PAT}-SNAPSHOT"
+
+            echo "Committing final release $TAG_NAME on main"
+            mvn -B -ntp versions:set -DremoveSnapshot -DgenerateBackupPoms=false -DprocessAllModules
+            git add pom.xml */*/pom.xml || true
+            git commit -m "release: cut $TAG_NAME" || { echo "Nothing to commit for release" >&2; exit 1; }
+            git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+            git push origin HEAD:main
+            git push origin "$TAG_NAME"
+          fi
+
+          echo "original_snapshot_version=$ORIGINAL_SNAPSHOT_VERSION" >> $GITHUB_OUTPUT
+          echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "next_dev_version=$NEXT_DEV_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "pre_release=$PRE_RELEASE" >> $GITHUB_OUTPUT
+          echo "pre_id=$PRE_ID" >> $GITHUB_OUTPUT
+          echo "prerelease_branch=$PRERELEASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+          echo "vendor=$VENDOR" >> $GITHUB_OUTPUT
+          echo "maintainer_email=$MAINTAINER_EMAIL" >> $GITHUB_OUTPUT
+
+          echo "Version commit and tag created."
+
+  build_jar:
+    name: Build JAR file (from tag)
+    runs-on: ubuntu-latest
+    needs: release_prepare
+    outputs:
+      jar_name: ${{ steps.build_jar.outputs.jar_name || '' }}
+      jar_path: ${{ steps.build_jar.outputs.jar_path || '' }}
+    if: needs.release_prepare.outputs.tag_name != ''
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_prepare.outputs.tag_name }}
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}
+          persist-credentials: true
+
+      - name: Retrieve Maven metadata from tag
+        run: |
+          set -euo pipefail
+          PARAMS=(
+            "project.version:MAVEN_VERSION"
+            "project.artifactId:APP_NAME"
+            "project.description:DESCRIPTION"
+            "project.organization.name:VENDOR"
+            "project.developers[0].email:MAINTAINER_EMAIL"
+          )
+          for entry in "${PARAMS[@]}"; do
+            IFS=':' read -r EXPR OUT <<< "$entry"
+            VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
+            VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
+            echo "$OUT=$VALUE" >> $GITHUB_ENV
+            echo "$OUT=$VALUE"
+          done
+
+      - name: Load cached maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
       - name: Log in to GHCR
         uses: docker/login-action@v2
@@ -54,191 +237,184 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.BOT_PACKAGES_TOKEN }}
 
-      - name: Restore cached env file
-        id: cache-restore
-        uses: actions/cache@v4
-        with:
-          path: .cache/env_vars
-          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-env-
-
-      - name: If cache miss, get Maven project metadata
-        id: get_maven_metadata
-        if: steps.cache-restore.outputs.cache-hit != 'true'
+      - name: Build .jar file
+        id: build_jar
+        env:
+          APP_NAME: ${{ needs.release_prepare.outputs.app_name }}
+          MAVEN_VERSION: ${{ needs.release_prepare.outputs.release_version }}
         run: |
-          
-          PARAMS=(
-          "project.version:MAVEN_VERSION"
-          "project.artifactId:APP_NAME"
-          "project.description:DESCRIPTION"
-          "project.organization.name:VENDOR"
-          "project.developers[0].email:MAINTAINER_EMAIL"
+          set -euo pipefail
+          chmod +x buildTools/build-jar.sh
+          bash buildTools/build-jar.sh
 
+      - name: Upload jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-jar
+          path: target/jar-build/output/*.jar
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  build_debs:
+    name: Build DEB for architectures (from tag)
+    runs-on: ubuntu-latest
+    needs: build_jar
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    if: needs.build_jar.outputs.jar_name != ''
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release_prepare.outputs.tag_name }}
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}
+          persist-credentials: true
+
+      - name: Retrieve Maven metadata from tag
+        run: |
+          set -euo pipefail
+          PARAMS=(
+            "project.version:MAVEN_VERSION"
+            "project.artifactId:APP_NAME"
+            "project.description:DESCRIPTION"
+            "project.organization.name:VENDOR"
+            "project.developers[0].email:MAINTAINER_EMAIL"
           )
-          
           for entry in "${PARAMS[@]}"; do
             IFS=':' read -r EXPR OUT <<< "$entry"
             VALUE=$(mvn -q -DforceStdout help:evaluate -Dexpression="$EXPR" 2>/dev/null || true)
             VALUE=$(echo -n "$VALUE" | tr -d '\r\n')
-            echo "Determined $EXPR: $VALUE"
-            if [ -z "$VALUE" ]; then
-              echo "Could not determine $EXPR via Maven (docker)" >&2
-              exit 1
-            fi
-            mkdir -p .cache
-            echo "${OUT}=${VALUE}" >> .cache/env_vars
-          done
-            echo "save-success=true" >> $GITHUB_OUTPUT
-
-      - name: Load cached env file into GITHUB_ENV
-        run: |
-          while IFS= read -r line; do
-            # handle CRLF if needed:
-            line=${line%$'\r'}
-            echo "$line" >> $GITHUB_ENV
-          done < ".cache/env_vars"
-
-      - name: Save cache (actions/cache uploads at end for misses)
-        if: steps.get_maven_metadata.save-success == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .cache/env_vars
-          key: ${{ runner.os }}-env-${{ hashFiles('pom.xml') }}
-
-
-      - name: Set release version (commit to main) before building
-        id: set_release
-        if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
-        env:
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
-        run: |
-          set -euo pipefail
-          CUR=${{ steps.get_maven_metadata.outputs.MAVEN_VERSION }}
-          RELEASE=${CUR%-SNAPSHOT}
-          echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
-          echo "tag=$RELEASE" >> $GITHUB_OUTPUT
-
-          # Use Maven versions plugin to set the release version
-          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
-          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$RELEASE" -DgenerateBackupPoms=false
-
-          # Commit and push the release version to main so build operates on the released POM
-          git config user.name "$BOT_USERNAME"
-          git config user.email "$BOT_MAIL"
-          git add pom.xml
-          git commit -m "chore(release): set version to $RELEASE [skip ci]" || echo "No changes to commit"
-          echo "Set release version $RELEASE for: ${{ github.event.pull_request.base.ref || github.ref }}"
-          git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
-
-
-      - name: Build .deb packages
-        run: |
-          set -euo pipefail
-          chmod +x buildTools/build-deb-in-docker.sh
-          bash buildTools/build-deb-in-docker.sh
-          echo "Built .deb packages; contents of target/deb-work/output/:"
-
-
-      - name: Check for existing GitHub Release for this tag
-        id: check_release
-        run: |
-          set -euo pipefail
-          TAG=v${{ steps.set_release.outputs.tag }}
-          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-          # Use the BOT_TOKEN when provided (falls back to GITHUB_TOKEN)
-          API_TOKEN=${{ secrets.BOT_TOKEN }}
-          HTTP_STATUS=$(curl -sSL -o /tmp/release_resp.json -w "%{http_code}" -H "Authorization: Bearer $API_TOKEN" "$API")
-          if [ "$HTTP_STATUS" = "200" ]; then
-            RELEASE_ID=$(jq -r .id /tmp/release_resp.json)
-            UPLOAD_URL=$(jq -r .upload_url /tmp/release_resp.json | sed -e 's/{?name,label}//')
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
-            echo "upload_url=$UPLOAD_URL" >> $GITHUB_OUTPUT
-            echo "Found existing release ID $RELEASE_ID for tag $TAG"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "No existing release found for tag $TAG"
-          fi
-
-      - name: Create and push git tag (if needed)
-        if: steps.check_release.outputs.exists != 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
-        env:
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
-        run: |
-          set -euo pipefail
-          TAG=v${{ steps.set_release.outputs.tag }}
-          git config user.name "$BOT_USERNAME"
-          git config user.email "$BOT_MAIL"
-          git fetch --prune --tags origin
-          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
-            echo "Tag $TAG already exists on remote; skipping tag creation"
-          else
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
-            echo "Pushed tag $TAG to origin"
-          fi
-
-      - name: Upload debs to existing release (if present)
-        if: steps.check_release.outputs.exists == 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
-        run: |
-          set -euo pipefail
-          UPLOAD_URL=${{ steps.check_release.outputs.upload_url }}
-          API_TOKEN=${{ secrets.BOT_TOKEN }}
-          for f in target/deb-work/output/*.deb; do
-            if [ -f "$f" ]; then
-              echo "Uploading $f to existing release"
-              curl -sSL -X POST "$UPLOAD_URL?name=$(basename "$f")" \
-                -H "Authorization: Bearer $API_TOKEN" \
-                -H "Content-Type: application/octet-stream" \
-                --data-binary @"$f" || echo "Warning: upload of $f failed"
-            fi
+            echo "$OUT=$VALUE" >> $GITHUB_ENV
+            echo "$OUT=$VALUE"
           done
 
-        ## TODO switch to v2
-      - name: Create GitHub Release and attach debs (if no existing release)
-        if: steps.check_release.outputs.exists != 'true' && (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.set_release.outputs.tag }}
-          name: v${{ steps.set_release.outputs.tag }}
-          files: 'target/deb-work/output/*.deb'
-        env:
-          GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+      - name: Set up QEMU emulation (for multi-arch builds)
+        uses: docker/setup-qemu-action@v2
 
-      - name: Bump main to next minor SNAPSHOT
-        id: bump_after_release
-        if: (github.event.pull_request != null && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+      - name: Download built jar artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: built-jar
+          path: target/deb-work/input
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.BOT_PACKAGES_TOKEN }}
+
+      - name: Build deb file for ${{ matrix.arch }}
         env:
-          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
-          BOT_MAIL: ${{ vars.BOT_MAIL  }}
+          JAR_NAME: ${{ needs.build_jar.outputs.jar_name || '' }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          chmod +x buildTools/build-deb.sh
+          bash buildTools/build-deb.sh
 
-          # Read current version via maven (should reflect the just-committed release version)
-          CUR_VER=$(docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
-          #CUR_VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
-          if [ -z "$CUR_VER" ]; then
-            echo "Could not determine current version for bump" >&2
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-deb-${{ matrix.arch }}
+          path: target/deb-work/artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  create_github_release:
+    name: Create GitHub Release & Upload Assets
+    runs-on: ubuntu-latest
+    needs: [release_prepare, build_debs]
+    if: needs.release_prepare.outputs.tag_name != '' && needs.build_debs.result == 'success'
+    steps:
+      - name: Download jar artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: built-jar
+          path: release-assets
+
+      - name: Download deb amd64
+        uses: actions/download-artifact@v5
+        with:
+          name: built-deb-amd64
+          path: release-assets
+
+      - name: Download deb arm64
+        uses: actions/download-artifact@v5
+        with:
+          name: built-deb-arm64
+          path: release-assets
+
+      - name: List assets
+        run: ls -lh release-assets
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.release_prepare.outputs.tag_name }}
+          name: Release ${{ needs.release_prepare.outputs.tag_name }}
+          body: |
+            Automated release for ${{ needs.release_prepare.outputs.tag_name }}
+            Pre-release: ${{ needs.release_prepare.outputs.pre_release }}
+            Pre-id: ${{ needs.release_prepare.outputs.pre_id }}
+            Bump type (final only): ${{ needs.release_prepare.outputs.bump_type }}
+            Description: ${{ needs.release_prepare.outputs.description }}
+          artifacts: "release-assets/*.jar,release-assets/*.deb"
+          token: ${{ secrets.BOT_TOKEN }}
+          draft: false
+          allowUpdates: false
+          prerelease: ${{ needs.release_prepare.outputs.pre_release == 'true' }}
+
+  post_release_bump:
+    name: Bump to next development version
+    runs-on: ubuntu-latest
+    needs: [release_prepare, build_debs, create_github_release]
+    if: >-
+      always() &&
+      needs.release_prepare.outputs.next_dev_version != '' &&
+      needs.release_prepare.outputs.pre_release == 'false' &&
+      needs.build_debs.result == 'success' &&
+      needs.create_github_release.result == 'success'
+    steps:
+      - name: Checkout main (includes release commit)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.BOT_TOKEN }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME  }}
+          BOT_MAIL: ${{ vars.BOT_MAIL  }}
+          persist-credentials: true
+
+      - name: Configure git user
+        run: |
+          git config user.name "$BOT_USERNAME"
+          git config user.email "$BOT_MAIL"
+
+      - name: Validate current pom matches release version
+        run: |
+          set -euo pipefail
+          CURRENT=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version 2>/dev/null || true)
+          if [ "$CURRENT" != "${{ needs.release_prepare.outputs.release_version }}" ]; then
+            echo "Main branch pom version ($CURRENT) does not match release version (${{ needs.release_prepare.outputs.release_version }}). Aborting dev bump." >&2
             exit 1
           fi
-          BASE=${CUR_VER%-SNAPSHOT}
-          IFS='.' read -r MAJ MIN REST <<< "$BASE" || true
-          MAJ=${MAJ:-0}
-          MIN=${MIN:-0}
-          NEW_MIN=$((MIN + 1))
-          NEW_VERSION="${MAJ}.${NEW_MIN}-SNAPSHOT"
 
-          echo "Setting new project version to $NEW_VERSION"
-          #mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
-          docker run --rm -v "$PWD":/workspace -w /workspace ghcr.io/flip-flop-foundry/talos-kms-builder:latest mvn -q org.codehaus.mojo:versions-maven-plugin:2.14.2:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
-
-          git config user.name "$BOT_USERNAME"
-          git config user.email "$BOT_MAIL"
-          git add pom.xml
-          git commit -m "ci: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
-
-          git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref }}
+      - name: Set next development version
+        run: |
+          set -euo pipefail
+          NEXT="${{ needs.release_prepare.outputs.next_dev_version }}"
+          mvn -B -ntp versions:set -DnewVersion="$NEXT" -DgenerateBackupPoms=false -DprocessAllModules
+          git add pom.xml */*/pom.xml || true
+          if git diff --cached --quiet; then
+            echo "No version change detected when setting next dev version $NEXT" >&2
+            exit 1
+          fi
+          git commit -m "chore(release): start $NEXT"
+          git push origin HEAD:main
+          echo "Bumped to $NEXT"
 
