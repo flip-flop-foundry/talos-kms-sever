@@ -93,7 +93,7 @@ jobs:
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
-          git remote set-url origin https://${$BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
+          git remote set-url origin https://${BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
 
       - name: Confirm actor and identity for debugging
         env:
@@ -564,7 +564,7 @@ jobs:
         run: |
           git config user.name "$BOT_USERNAME"
           git config user.email "$BOT_MAIL"
-          git remote set-url origin https://${$BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
+          git remote set-url origin https://${BOT_USERNAME}:${BOT_TOKEN}@github.com/flip-flop-foundry/talos-kms-sever.git
 
       - name: Validate current pom matches release version
         run: |
